@@ -1,0 +1,7 @@
+URL: http://www.marvell.com
+Version: SD-WLAN-BT-FM-8787-LINUX2625-SAAR-14.64.1.p34-M2614058-1-GPL.TAR
+License: GPL v2
+License File: wlan_src/gpl-2.0.txt
+
+Description:
+  Vendor drop of 8787 support (awaiting push upstream).
