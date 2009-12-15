@@ -9,7 +9,7 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-KERNELDIR=
+KERNELDIR=lib/modules/2.6.31.4-chromeos-intel-menlow/kernel/drivers/net/wireless
 INSTALL_DIR=$(CURDIR)/debian/marvell-8787
 
 configure: configure-stamp
@@ -45,8 +45,10 @@ install: build
 	dh_installdirs
 
 	mkdir -p $(INSTALL_DIR)
-	cp -r build/* $(INSTALL_DIR)
 	cp marvell_8787 $(INSTALL_DIR)/etc/modprobe.d
+
+	mkdir -p $(INSTALL_DIR)/$(KERNELDIR)
+	cp  build/*.ko $(INSTALL_DIR)/$(KERNELDIR)
 
 	mkdir -p $(INSTALL_DIR)/lib/firmware/mrvl
 	cp FwImage/sd8787.bin $(INSTALL_DIR)/lib/firmware/mrvl
