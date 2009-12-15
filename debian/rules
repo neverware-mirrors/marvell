@@ -45,7 +45,7 @@ install: build
 	dh_installdirs
 
 	mkdir -p $(INSTALL_DIR)
-	cp marvell_8787 $(INSTALL_DIR)/etc/modprobe.d
+	cp marvell_8787.conf $(INSTALL_DIR)/etc/modprobe.d
 
 	mkdir -p $(INSTALL_DIR)/$(KERNELDIR)
 	cp  build/*.ko $(INSTALL_DIR)/$(KERNELDIR)
