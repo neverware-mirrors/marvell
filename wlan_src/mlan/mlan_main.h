@@ -331,12 +331,12 @@ do {                                    \
 
 #ifdef SDIO_MULTI_PORT_TX_AGGR
 /** Multi port TX aggregation buffer size */
-#define SDIO_MP_TX_AGGR_DEF_BUF_SIZE        (4096)      /* 4K */
+#define SDIO_MP_TX_AGGR_DEF_BUF_SIZE        (8192)      /* 8K */
 #endif /* SDIO_MULTI_PORT_TX_AGGR */
 
 #ifdef SDIO_MULTI_PORT_RX_AGGR
 /** Multi port RX aggregation buffer size */
-#define SDIO_MP_RX_AGGR_DEF_BUF_SIZE        (4096)      /* 4K */
+#define SDIO_MP_RX_AGGR_DEF_BUF_SIZE        (16384)     /* 16K */
 #endif /* SDIO_MULTI_PORT_RX_AGGR */
 
 /** Debug command number */
@@ -1128,6 +1128,11 @@ typedef struct _mlan_adapter
     sdio_mpa_rx mpa_rx;
 #endif                          /* SDIO_MULTI_PORT_RX_AGGR */
 
+    /** SDIO interrupt mode */
+    t_u32 int_mode;
+    /** GPIO interrupt pin */
+    t_u32 gpio_pin;
+
     /** Event cause */
     t_u32 event_cause;
     /** Event buffer */
@@ -1271,6 +1276,8 @@ typedef struct _mlan_adapter
     /** Beacon miss timeout */
     t_u16 bcn_miss_time_out;
 
+    /** Firmware wakeup method */
+    t_u16 fw_wakeup_method;
     /** Deep Sleep flag */
     t_u8 is_deep_sleep;
 

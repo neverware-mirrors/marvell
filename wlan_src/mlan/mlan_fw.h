@@ -53,6 +53,13 @@ extern t_u8 AdhocRates_B[B_SUPPORTED_RATES];
 extern t_u8 AdhocRates_BG[BG_SUPPORTED_RATES];
 extern t_u8 AdhocRates_A[A_SUPPORTED_RATES];
 
+/** Firmware wakeup method : Unchanged */
+#define WAKEUP_FW_UNCHANGED                     0
+/** Firmware wakeup method : Through interface */
+#define WAKEUP_FW_THRU_INTERFACE                1
+/** Firmware wakeup method : Through GPIO*/
+#define WAKEUP_FW_THRU_GPIO                     2
+
 /** WEP Key index mask */
 #define HostCmd_WEP_KEY_INDEX_MASK              0x3fff
 
@@ -604,6 +611,9 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** Host Command ID : 802.11 get status */
 #define HostCmd_CMD_WMM_GET_STATUS            0x0071
 
+/** Host Command ID : 802.11 firmware wakeup method */
+#define HostCmd_CMD_802_11_FW_WAKE_METHOD     0x0074
+
 /** Host Command ID : 802.11 Tx rate query */
 #define HostCmd_CMD_802_11_TX_RATE_QUERY      0x007f
 
@@ -615,6 +625,9 @@ typedef enum _WLAN_802_11_WEP_STATUS
 
 /** Host Command ID : Memory access */
 #define HostCmd_CMD_MEM_ACCESS                0x0086
+
+/** Host Command ID : SDIO GPIO interrupt configuration */
+#define HostCmd_CMD_SDIO_GPIO_INT_CONFIG      0x0088
 
 #ifdef MFG_CMD_SUPPORT
 /** Host Command ID : Mfg command */
@@ -1448,6 +1461,31 @@ typedef MLAN_PACK_START struct _HostCmd_DS_802_11_AD_HOC_JOIN
     t_u16 reserved2;
 } MLAN_PACK_END HostCmd_DS_802_11_AD_HOC_JOIN;
 
+/** Interrupt Mode SDIO */
+#define INTMODE_SDIO        0
+/** Interrupt Mode GPIO */
+#define INTMODE_GPIO        1
+
+/** Interrupt Raising Edge */
+#define INT_RASING_EDGE     0
+/** Interrupt Falling Edge */
+#define INT_FALLING_EDGE    1
+
+/** Delay 1 usec */
+#define DELAY_1_US          1
+
+typedef MLAN_PACK_START struct _HostCmd_DS_SDIO_GPIO_INT_CONFIG
+{
+    /** Action */
+    t_u16 action;
+    /** GPIO interrupt pin */
+    t_u16 gpio_pin;
+    /** GPIO interrupt edge, 1: failing edge; 0: raising edge */
+    t_u16 gpio_int_edge;
+    /** GPIO interrupt pulse widthin usec units */
+    t_u16 gpio_pulse_width;
+} MLAN_PACK_END HostCmd_DS_SDIO_GPIO_INT_CONFIG;
+
 typedef MLAN_PACK_START struct _HostCmd_DS_SDIO_PULL_CTRL
 {
     /** Action */
@@ -1570,6 +1608,15 @@ typedef MLAN_PACK_START struct _HostCmd_DS_802_11_BCA_TIMESHARE
     /** PTA arbiter time in msec */
     t_u32 bt_time;
 } MLAN_PACK_END HostCmd_DS_802_11_BCA_TIMESHARE;
+
+/** HostCmd_CMD_802_11_FW_WAKE_METHOD */
+typedef MLAN_PACK_START struct _HostCmd_DS_802_11_FW_WAKEUP_METHOD
+{
+    /** Action */
+    t_u16 action;
+    /** Method */
+    t_u16 method;
+} MLAN_PACK_END HostCmd_DS_802_11_FW_WAKEUP_METHOD;
 
 /** SNMP_MIB_INDEX */
 typedef enum _SNMP_MIB_INDEX
@@ -2666,6 +2713,7 @@ typedef struct _HostCmd_DS_COMMAND
         /** Power Save mode */
         HostCmd_DS_802_11_PS_MODE ps_mode;
         HostCmd_DS_802_11_HOST_SLEEP_CFG hs_cfg;
+        HostCmd_DS_802_11_FW_WAKEUP_METHOD fwwakeupmethod;
         /** Scan */
         HostCmd_DS_802_11_SCAN scan;
         /** Scan response */
@@ -2757,6 +2805,8 @@ typedef struct _HostCmd_DS_COMMAND
        /** Sleep params command */
         HostCmd_DS_802_11_SLEEP_PARAMS sleep_param;
 
+       /** SDIO GPIO interrupt config command */
+        HostCmd_DS_SDIO_GPIO_INT_CONFIG sdio_gpio_int;
     } params;
 } HostCmd_DS_COMMAND;
 

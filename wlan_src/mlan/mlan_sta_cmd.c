@@ -516,6 +516,43 @@ wlan_cmd_802_11_hs_cfg(IN pmlan_private pmpriv,
     return MLAN_STATUS_SUCCESS;
 }
 
+/**
+ * @brief This function prepares command of fw_wakeup_method.
+ *
+ * @param pmpriv       A pointer to mlan_private structure
+ * @param cmd          A pointer to HostCmd_DS_COMMAND structure
+ * @param cmd_action   The action: GET or SET
+ * @param pdata_buf    A pointer to data buffer
+ *
+ * @return             MLAN_STATUS_SUCCESS
+ */
+static mlan_status
+wlan_cmd_802_11_fw_wakeup_method(IN pmlan_private pmpriv,
+                                 IN HostCmd_DS_COMMAND * cmd,
+                                 IN t_u16 cmd_action, IN t_u16 * pdata_buf)
+{
+    HostCmd_DS_802_11_FW_WAKEUP_METHOD *fwwm = &cmd->params.fwwakeupmethod;
+
+    ENTER();
+
+    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_FW_WAKE_METHOD);
+    cmd->size =
+        wlan_cpu_to_le16(sizeof(HostCmd_DS_802_11_FW_WAKEUP_METHOD) + S_DS_GEN);
+    fwwm->action = wlan_cpu_to_le16(cmd_action);
+    switch (cmd_action) {
+    case HostCmd_ACT_GEN_SET:
+        fwwm->method = wlan_cpu_to_le16(*pdata_buf);
+        break;
+    case HostCmd_ACT_GEN_GET:
+    default:
+        fwwm->method = WAKEUP_FW_UNCHANGED;
+        break;
+    }
+
+    LEAVE();
+    return MLAN_STATUS_SUCCESS;
+}
+
 /** 
  *  @brief This function prepares command of mac_address.
  *  
@@ -1666,6 +1703,10 @@ mlan_sta_prepare_cmd(IN t_void * priv,
         cmd_ptr->command = wlan_cpu_to_le16(cmd_no);
         cmd_ptr->size = wlan_cpu_to_le16(S_DS_GEN);
         break;
+    case HostCmd_CMD_802_11_FW_WAKE_METHOD:
+        ret = wlan_cmd_802_11_fw_wakeup_method(pmpriv, cmd_ptr,
+                                               cmd_action, (t_u16 *) pdata_buf);
+        break;
     case HostCmd_CMD_802_11_DEEP_SLEEP:
         cmd_ptr->command = wlan_cpu_to_le16(cmd_no);
         cmd_ptr->size = wlan_cpu_to_le16((t_u16)
@@ -1841,6 +1882,9 @@ mlan_sta_prepare_cmd(IN t_void * priv,
             wlan_cmd_802_11_bca_timeshare(pmpriv, cmd_ptr, cmd_action,
                                           pdata_buf);
         break;
+    case HostCmd_CMD_SDIO_GPIO_INT_CONFIG:
+        ret = wlan_cmd_sdio_gpio_int(pmpriv, cmd_ptr, cmd_action, pdata_buf);
+        break;
     default:
         PRINTM(MERROR, "PREP_CMD: unknown command- %#x\n", cmd_no);
         ret = MLAN_STATUS_FAILURE;
@@ -1868,6 +1912,14 @@ mlan_sta_init_cmd(IN t_void * priv, IN t_u8 first_sta)
     ENTER();
 
     if (first_sta == MTRUE) {
+        /* 
+         * This should be issued in the very first to config 
+         *   SDIO_GPIO interrupt mode.
+         */
+        if (wlan_set_sdio_gpio_int(pmpriv) != MLAN_STATUS_SUCCESS) {
+            ret = MLAN_STATUS_FAILURE;
+            goto done;
+        }
 
         ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_FUNC_INIT,
                                HostCmd_ACT_GEN_SET, 0, MNULL, MNULL);
@@ -1880,6 +1932,15 @@ mlan_sta_init_cmd(IN t_void * priv, IN t_u8 first_sta)
          */
         ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_GET_HW_SPEC,
                                HostCmd_ACT_GEN_GET, 0, MNULL, MNULL);
+        if (ret) {
+            ret = MLAN_STATUS_FAILURE;
+            goto done;
+        }
+
+        /* set fw wakeup method */
+        ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_802_11_FW_WAKE_METHOD,
+                               HostCmd_ACT_GEN_GET, 0, MNULL,
+                               &pmpriv->adapter->fw_wakeup_method);
         if (ret) {
             ret = MLAN_STATUS_FAILURE;
             goto done;

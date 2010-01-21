@@ -133,7 +133,11 @@ wlan_send_null_packet(pmlan_private priv, t_u8 flags)
     pmlan_adapter pmadapter = priv->adapter;
     TxPD *ptx_pd;
 /* sizeof(TxPD) + Interface specific header */
-#define NULL_PACKET_HDR 64
+/* The will be required as Syskonnect has DMA boundary
+and if the end of memory allocated happens to fall in
+this boundary then there would be no interrupt genrated for
+DMA transfer complete */
+#define NULL_PACKET_HDR 256
     t_u32 data_len = NULL_PACKET_HDR + HEADER_ALIGNMENT;
     pmlan_buffer pmbuf = MNULL;
     t_u8 *ptr;

@@ -1,0 +1,5 @@
+hciconfig hci0 down
+sleep 1
+#cardctl suspend
+rmmod bt8xxx
+./mrvlsdio_unload 

@@ -145,6 +145,8 @@ Change log:
 #define	WOAL_SET_GET_WWS_CFG        12
 /** Private command ID to set/get sleep period */
 #define WOAL_SLEEP_PD               13
+/** Private command ID to set/get firmware wakeup method */
+#define WOAL_FW_WAKEUP_METHOD       15
 /** Private command ID to set/get auth type */
 #define WOAL_AUTH_TYPE              18
 
@@ -322,6 +324,11 @@ static const struct iw_priv_args woal_private_args[] = {
      IW_PRIV_TYPE_INT | 1,
      IW_PRIV_TYPE_INT | 1,
      "sleeppd"},
+    {
+     WOAL_FW_WAKEUP_METHOD,
+     IW_PRIV_TYPE_INT | 1,
+     IW_PRIV_TYPE_INT | 1,
+     "fwwakeupmethod"},
     {
      WOAL_AUTH_TYPE,
      IW_PRIV_TYPE_INT | 1,

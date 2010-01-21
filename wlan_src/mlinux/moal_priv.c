@@ -2974,6 +2974,74 @@ woal_sleep_pd(moal_private * priv, struct iwreq *wrq)
 }
 
 /**
+ * @brief Set/Get module configuration
+ * 
+ * @param priv     A pointer to moal_private structure
+ * @param wrq      A pointer to iwreq structure
+ * 
+ * @return         0 --success, otherwise fail
+ */
+static int
+woal_fw_wakeup_method(moal_private * priv, struct iwreq *wrq)
+{
+    int ret = 0, data;
+    mlan_ds_pm_cfg *pm_cfg = NULL;
+    mlan_ioctl_req *req = NULL;
+
+    ENTER();
+
+    req = woal_alloc_mlan_ioctl_req(sizeof(mlan_ds_pm_cfg));
+    if (req == NULL) {
+        ret = -ENOMEM;
+        goto done;
+    }
+    pm_cfg = (mlan_ds_pm_cfg *) req->pbuf;
+
+    if (wrq->u.data.length > 1) {
+        ret = -EINVAL;
+        goto done;
+    }
+    if (!wrq->u.data.length) {
+        req->action = MLAN_ACT_GET;
+    } else {
+        req->action = MLAN_ACT_SET;
+        if (copy_from_user(&data, wrq->u.data.pointer, sizeof(int))) {
+            PRINTM(MINFO, "Copy from user failed\n");
+            ret = -EFAULT;
+            goto done;
+        }
+        if (data > 2) {
+            ret = -EINVAL;
+            goto done;
+        }
+        pm_cfg->param.fw_wakeup_method = data;
+    }
+
+    pm_cfg->sub_command = MLAN_OID_PM_CFG_FW_WAKEUP_METHOD;
+    req->req_id = MLAN_IOCTL_PM_CFG;
+
+    if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, req, MOAL_IOCTL_WAIT)) {
+        ret = -EFAULT;
+        goto done;
+    }
+
+    data = ((mlan_ds_pm_cfg *) req->pbuf)->param.fw_wakeup_method;
+
+    if (copy_to_user(wrq->u.data.pointer, &data, sizeof(int))) {
+        ret = -EFAULT;
+        goto done;
+    }
+    wrq->u.data.length = 1;
+
+  done:
+    if (req)
+        kfree(req);
+
+    LEAVE();
+    return ret;
+}
+
+/**
  * @brief Configuer sleep parameters
  *
  * @param priv         A pointer to moal_private structure
@@ -4478,22 +4546,17 @@ woal_cmd52rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
            data);
 
     if (!rw) {
-        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        data =
-            sdio_readb(((struct sdio_mmc_card *) priv->phandle->card)->func,
-                       reg, &ret);
-        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        if (ret) {
-            PRINTM(MERROR, "sdio_readb: reading register 0x%X failed\n", reg);
+        if (sdio_read_ioreg(priv->phandle->card, func, reg, &data) < 0) {
+            PRINTM(MERROR, "sdio_read_ioreg: reading register 0x%X failed\n",
+                   reg);
+            ret = MLAN_STATUS_FAILURE;
             goto done;
         }
     } else {
-        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        sdio_writeb(((struct sdio_mmc_card *) priv->phandle->card)->func, data,
-                    reg, &ret);
-        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        if (ret) {
-            PRINTM(MERROR, "sdio_writeb: writing register 0x%X failed\n", reg);
+        if (sdio_write_ioreg(priv->phandle->card, func, reg, data) < 0) {
+            PRINTM(MERROR, "sdio_write_ioreg: writing register 0x%X failed\n",
+                   reg);
+            ret = MLAN_STATUS_FAILURE;
             goto done;
         }
     }
@@ -4574,12 +4637,10 @@ woal_cmd53rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
            func, reg, mode, blklen, blknum);
 
     if (!rw) {
-        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        if (!sdio_readsb
-            (((struct sdio_mmc_card *) priv->phandle->card)->func, data, reg,
-             total_len))
-            PRINTM(MERROR, "sdio_readsb: reading memory 0x%x failed\n", reg);
-        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (sdio_read_iomem(priv->phandle->card, func, reg, mode,
+                            FIXED_ADDRESS, blknum, blklen, data) < 0)
+            PRINTM(MERROR, "sdio_read_iomem: reading memory 0x%x failed\n",
+                   reg);
 
         if (copy_to_user(wrq->u.data.pointer, data, sizeof(data))) {
             PRINTM(MINFO, "Copy to user failed\n");
@@ -4596,12 +4657,10 @@ woal_cmd53rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
         for (pos = 0; pos < total_len; pos++)
             data[pos] = buf[11 + (pos % pattern_len)];
 
-        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
-        if (!sdio_writesb
-            (((struct sdio_mmc_card *) priv->phandle->card)->func, reg, data,
-             total_len))
-            PRINTM(MERROR, "sdio_writesb: writing memory 0x%x failed\n", reg);
-        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (sdio_write_iomem(priv->phandle->card, func, reg, mode,
+                             FIXED_ADDRESS, blknum, blklen, data) < 0)
+            PRINTM(MERROR, "sdio_write_iomem: writing memory 0x%x failed\n",
+                   reg);
     }
 
   done:
@@ -5737,6 +5796,9 @@ woal_do_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
             break;
         case WOAL_SLEEP_PD:
             ret = woal_sleep_pd(priv, wrq);
+            break;
+        case WOAL_FW_WAKEUP_METHOD:
+            ret = woal_fw_wakeup_method(priv, wrq);
             break;
         case WOAL_AUTH_TYPE:
             ret = woal_auth_type(priv, wrq);

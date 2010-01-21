@@ -20,6 +20,6 @@ mkdir -p $BUILDDIR
 
 pushd wlan_src
 make clean || true
-make -j$NUM_JOBS
-make INSTALLDIR=$BUILDDIR install
+make -j$NUM_JOBS KERNELDIR=$KERNELDIR CROSS_COMPILE=$CROSS_COMPILE ARCH=$ARCH
+make KERNELDIR=$KERNELDIR ARCH=$ARCH INSTALLDIR=$BUILDDIR install
 popd

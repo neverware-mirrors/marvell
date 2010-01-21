@@ -306,7 +306,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->mpa_tx.pkt_cnt = 0;
     pmadapter->mpa_tx.start_port = 0;
 
-    pmadapter->mpa_tx.enabled = 0; //058-1 1;
+    pmadapter->mpa_tx.enabled = 1;
     pmadapter->mpa_tx.pkt_aggr_limit = SDIO_MP_AGGR_DEF_PKT_LIMIT;
 #endif /* SDIO_MULTI_PORT_TX_AGGR */
 
@@ -315,7 +315,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->mpa_rx.pkt_cnt = 0;
     pmadapter->mpa_rx.start_port = 0;
 
-    pmadapter->mpa_rx.enabled = 0; //0-58-1 1;
+    pmadapter->mpa_rx.enabled = 1;
     pmadapter->mpa_rx.pkt_aggr_limit = SDIO_MP_AGGR_DEF_PKT_LIMIT;
 #endif /* SDIO_MULTI_PORT_RX_AGGR */
 
@@ -357,6 +357,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
 
     pmadapter->local_listen_interval = 0;       /* default value in firmware
                                                    will be used */
+    pmadapter->fw_wakeup_method = WAKEUP_FW_UNCHANGED;
 
     pmadapter->is_deep_sleep = MFALSE;
 

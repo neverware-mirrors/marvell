@@ -24,3 +24,4 @@ wlan_src/.tmp_versions
 wlan_src/Module.markers
 wlan_src/Module.symvers
 wlan_src/modules.order
+io/sdio/syskt/modules.order

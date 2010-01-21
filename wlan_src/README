@@ -14,13 +14,10 @@
 
 	a) Copy sd8786.bin | sd8787.bin | ... to /lib/firmware/mrvl/ directory, 
 	   create the directory if it doesn't exist. 
-	b) Install WLAN driver,
-		insmod mlan.ko
-		insmod sd8xxx.ko [helper_name=mrvl/helper_sd.bin] [fw_name=mrvl/sd8xxx.bin]
-	c) Uninstall WLAN driver,
-		ifconfig mlanX down
-		rmmod sd8xxx
-		rmmod mlan
+	b) Install SDIO bus driver and WLAN driver,
+		./load sd8786 | sd8688 | ...
+	c) Uninstall WLAN driver and SDIO bus driver,
+		./unload
 
 	To load driver with MFG firmware file, use mfg_mode=1 when insmod WLAN driver and 
 	specify MFG firmware name if needed.
@@ -103,6 +100,12 @@
 	lock_count = <number of lock used>
 
 	Use dmesg or cat /var/log/debug to check driver debug messages.
+	To log driver debug messages to file,
+	a) Edit /etc/syslog.conf, add one line "*.debug		/var/log/debug"
+	   on kernel 2.6.24 or later, edit /etc/rsyslog.conf instead
+	b) touch /var/log/debug (if the file doesn't exist)
+	c) service syslog restart
+	   on kernel 2.6.24 or later, service rsyslog restart
 
 	Update /proc/sys/kernel/printk to change message log levels.
 	For example,
@@ -170,6 +173,7 @@ SYNOPSIS
 	iwpriv mlanX vsiecfg <action> <id> [<mask> [data1] ... [dataN]]
 	iwpriv mlanX sleeppd [n]
 	iwpriv mlanX pscfg [n1] [n2] [n3] [n4] [n5] [n6]
+        iwpriv mlanX fwwakeupmethod [n]
 	iwpriv mlanX sleepparams [<p1> <p2> <p3> <p4> <p5> <p6>]
 	iwpriv mlanX authtype [n]
 
@@ -560,7 +564,7 @@ mpactrl
 		                           : Enable MP aggregation for Tx, Rx
 		                           : Set Tx, Rx buffer size to 2048 bytes.
 		                           : Set maximum Tx ports to 5 and maximum Rx ports to 7.
-	default values are 1 1 4096 4096 8 8
+	default values are 1 1 8192 16384 8 8
 
 tideligtbl
 	This command is used to set/get number of available ports for transfer 
@@ -1173,6 +1177,18 @@ pscfg
 		                                : Disable DTIM interval, set local listen interval to 
 		                                  10 beacon intervals and beacon miss interval to 20, 
 		                                  all the other configurations are unchanged
+
+fwwakeupmethod
+	This command is used to set/get the firmware wakeup method.
+
+	where value is:
+		1	-- Firmware wakeup through the interface command interrupt
+			-- (default setting for SDIO/GSPI)
+		2	-- Firmware wakeup through the GPIO pin
+
+	Examples:
+		iwpriv mlan0 fwwakeupmethod     : Get current firmware wakeup method
+		iwpriv mlan0 fwwakeupmethod 2   : Set firmware wakeup method to GPIO mode
 
 sleepparams
 	This command is used to set the sleepclock configurations

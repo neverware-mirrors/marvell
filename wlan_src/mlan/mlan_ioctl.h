@@ -98,6 +98,7 @@ enum
     MLAN_OID_PM_CFG_DEEP_SLEEP,
     MLAN_OID_PM_CFG_SLEEP_PD,
     MLAN_OID_PM_CFG_PS_CFG,
+    MLAN_OID_PM_CFG_FW_WAKEUP_METHOD,
     MLAN_OID_PM_CFG_SLEEP_PARAMS,
 
     /* WMM Configuration Group */
@@ -1199,6 +1200,8 @@ typedef struct _mlan_ds_pm_cfg
         t_u32 sleep_period;
         /** PS configuration parameters for MLAN_OID_PM_CFG_PS_CFG */
         mlan_ds_ps_cfg ps_cfg;
+        /** FW wakeup method for MLAN_OID_PM_CFG_FW_WAKEUP_METHOD */
+        t_u32 fw_wakeup_method;
         /** PS configuration parameters for MLAN_OID_PM_CFG_SLEEP_PARAMS */
         mlan_ds_sleep_params sleep_params;
     } param;

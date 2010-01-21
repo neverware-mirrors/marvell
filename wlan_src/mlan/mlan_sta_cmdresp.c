@@ -841,6 +841,40 @@ wlan_ret_802_11_sleep_params(IN pmlan_private pmpriv,
     return MLAN_STATUS_SUCCESS;
 }
 
+/**
+ *  @brief This function handles the command response of fw_wakeup_method
+ *
+ *  @param pmpriv       A pointer to mlan_private structure
+ *  @param resp         A pointer to HostCmd_DS_COMMAND
+ *  @param pioctl_buf   A pointer to mlan_ioctl_req structure
+ *
+ *  @return             MLAN_STATUS_SUCCESS
+ */
+static mlan_status
+wlan_ret_fw_wakeup_method(IN pmlan_private pmpriv,
+                          IN HostCmd_DS_COMMAND * resp,
+                          IN mlan_ioctl_req * pioctl_buf)
+{
+    HostCmd_DS_802_11_FW_WAKEUP_METHOD *fwwm = &resp->params.fwwakeupmethod;
+    t_u16 action;
+
+    ENTER();
+
+    action = wlan_le16_to_cpu(fwwm->action);
+
+    switch (action) {
+    case HostCmd_ACT_GEN_GET:
+    case HostCmd_ACT_GEN_SET:
+        pmpriv->adapter->fw_wakeup_method = wlan_le16_to_cpu(fwwm->method);
+        break;
+    default:
+        break;
+    }
+
+    LEAVE();
+    return MLAN_STATUS_SUCCESS;
+}
+
 /** 
  *  @brief This function handles the command response of mac_address
  *  
@@ -1743,6 +1777,9 @@ mlan_process_sta_cmdresp(IN t_void * priv,
     case HostCmd_CMD_802_11_SLEEP_PARAMS:
         ret = wlan_ret_802_11_sleep_params(pmpriv, resp, pioctl_buf);
         break;
+    case HostCmd_CMD_802_11_FW_WAKE_METHOD:
+        ret = wlan_ret_fw_wakeup_method(pmpriv, resp, pioctl_buf);
+        break;
     case HostCmd_CMD_802_11_ASSOCIATE:
         ret = wlan_ret_802_11_associate(pmpriv, resp, pioctl_buf);
         break;
@@ -1880,6 +1917,8 @@ mlan_process_sta_cmdresp(IN t_void * priv,
         break;
     case HostCmd_CMD_802_11_BCA_CONFIG_TIMESHARE:
         ret = wlan_ret_802_11_bca_timeshare(pmpriv, resp, pioctl_buf);
+        break;
+    case HostCmd_CMD_SDIO_GPIO_INT_CONFIG:
         break;
     default:
         PRINTM(MERROR, "CMD_RESP: Unknown command response %#x\n",

@@ -28,11 +28,10 @@
 
 	a) Copy sd8790.bin | sd8787.bin | ... to /lib/firmware/mrvl/ directory, 
 	   create the directory if it doesn't exist.
-	b) Install bluetooth driver,
-		insmod bt8688.ko | bt8790.ko | ...
+	b) Install sdio bus driver and bluetooth driver,
+		./load bt8688 | bt8790 | ...
 	c) Uninstall bluetooth driver and sdio bus driver,
-		hciconfig hciX down
-		rmmod bt8xxx
+		./unload
 
 3) cat /proc/net/mbt/hcix/config
    This command is used to get the current driver settings. 

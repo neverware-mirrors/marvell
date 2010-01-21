@@ -390,9 +390,12 @@ wlan_pm_wakeup_card(IN pmlan_adapter pmadapter)
 
     ENTER();
     PRINTM(MCMND, "Wakeup device...\n");
-    ret =
-        pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG,
-                            HOST_POWER_UP);
+    if (pmadapter->fw_wakeup_method == WAKEUP_FW_THRU_GPIO) {
+        /* GPIO_PORT_TO_LOW(); */
+    } else
+        ret =
+            pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG,
+                                HOST_POWER_UP);
 
     LEAVE();
     return ret;
@@ -413,7 +416,11 @@ wlan_pm_reset_card(IN pmlan_adapter pmadapter)
 
     ENTER();
 
-    ret = pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG, 0);
+    if (pmadapter->fw_wakeup_method == WAKEUP_FW_THRU_GPIO) {
+        /* GPIO_PORT_TO_HIGH(); */
+    } else
+        ret =
+            pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG, 0);
 
     LEAVE();
     return ret;

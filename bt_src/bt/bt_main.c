@@ -701,7 +701,6 @@ bt_add_card(void *card)
     priv->bt_dev.card = card;
     btpriv = priv;
     hdev->driver_data = priv;
-    ((struct sdio_mmc_card *) card)->priv = priv;
     /* 
      * Register the device. Fillup the private data structure with
      * relevant information from the card and request for the required
@@ -751,7 +750,6 @@ bt_add_card(void *card)
   err_init_fw:
     sbi_unregister_dev(priv);
   err_registerdev:
-    ((struct sdio_mmc_card *) card)->priv = NULL;
     /* Stop the thread servicing the interrupts */
     priv->adapter->SurpriseRemoved = TRUE;
     wake_up_interruptible(&priv->MainThread.waitQ);

@@ -170,6 +170,13 @@ mlan_register(IN pmlan_device pmdevice, OUT t_void ** ppmlan_adapter)
 
     /* Save pmoal_handle */
     pmadapter->pmoal_handle = pmdevice->pmoal_handle;
+    pmadapter->int_mode = pmdevice->int_mode;
+    pmadapter->gpio_pin = pmdevice->gpio_pin;
+    if ((pmadapter->int_mode == INTMODE_GPIO) && (pmadapter->gpio_pin == 0)) {
+        PRINTM(MERROR, "SDIO_GPIO_INT_CONFIG: Invalid GPIO Pin\n");
+        ret = MLAN_STATUS_FAILURE;
+        goto error;
+    }
     /* card specific probing has been deferred until now .. */
     if (MLAN_STATUS_SUCCESS != (ret = wlan_sdio_probe(pmadapter))) {
         ret = MLAN_STATUS_FAILURE;

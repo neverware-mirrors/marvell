@@ -361,6 +361,9 @@ woal_sched_timeout(t_u32 millisec)
 /** Release semaphore */
 #define MOAL_REL_SEMAPHORE(x) 		up(x)
 
+/** Max loop count (* 100ms) for waiting device ready at init time */
+#define MAX_WAIT_DEVICE_READY_COUNT	50
+
 /** Default watchdog timeout */
 #define MRVDRV_DEFAULT_WATCHDOG_TIMEOUT (5 * HZ)
 
@@ -529,6 +532,8 @@ struct _moal_handle
         /** Flag of re-association on/off */
     BOOLEAN reassoc_on;
 #endif                          /* REASSOCIATION */
+        /** SDIO interrupt flag */
+    atomic_t int_flag;
         /** Driver workqueue */
     struct workqueue_struct *workqueue;
         /** main work */

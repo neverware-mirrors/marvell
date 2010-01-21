@@ -15,7 +15,7 @@ Change log:
 #define _MLAN_DECL_H_
 
 /** MLAN release version */
-#define MLAN_RELEASE_VERSION		"058-1"
+#define MLAN_RELEASE_VERSION		"058"
 
 /** Re-define generic data types for MLAN/MOAL */
 /** Signed char (1-byte) */
@@ -491,6 +491,10 @@ typedef struct _mlan_device
     /** MFG mode */
     t_u32 mfg_mode;
 #endif
+    /** SDIO interrupt mode */
+    t_u32 int_mode;
+    /** GPIO interrupt pin */
+    t_u32 gpio_pin;
 } mlan_device, *pmlan_device;
 
 /** MLAN API function prototype */
@@ -522,6 +526,9 @@ MLAN_API mlan_status mlan_send_packet(IN t_void * pmlan_adapter,
 
 /** interrupt handler */
 MLAN_API t_void mlan_interrupt(IN t_void * pmlan_adapter);
+
+/** GPIO IRQ callback function */
+MLAN_API t_void mlan_hs_callback(IN t_void * pctx);
 
 /** mlan ioctl */
 MLAN_API mlan_status mlan_ioctl(IN t_void * pmlan_adapter,

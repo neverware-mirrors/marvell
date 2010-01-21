@@ -215,22 +215,4 @@ typedef IRQ_RET_TYPE(*isr_notifier_fn_t) (s32 irq, void *dev_id,
 /** Rx unit register */
 #define CARD_RX_UNIT_REG		0x63
 
-struct sdio_mmc_card
-{
-        /** sdio_func structure pointer */
-    struct sdio_func *func;
-        /** bt_private structure pointer */
-    bt_private *priv;
-};
-#ifdef PXA3XX_DMA_ALIGN
-/** DMA alignment value for PXA3XX platforms */
-#define PXA3XX_DMA_ALIGNMENT	8
-/** Macros for Data Alignment : size */
-#define ALIGN_SZ(p, a)	\
-	(((p) + ((a) - 1)) & ~((a) - 1))
-
-/** Macros for Data Alignment : address */
-#define ALIGN_ADDR(p, a)	\
-	((((u32)(p)) + (((u32)(a)) - 1)) & ~(((u32)(a)) - 1))
-#endif /* !PXA3XX */
 #endif /* _BT_SDIO_H_ */

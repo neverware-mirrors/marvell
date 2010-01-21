@@ -2094,6 +2094,45 @@ wlan_pm_ioctl_hs_cfg(IN pmlan_adapter pmadapter,
     return ret;
 }
 
+/**
+ *  @brief Get/Set the firmware wakeup method
+ *
+ *  @param pmadapter	A pointer to mlan_adapter structure
+ *  @param pioctl_req	A pointer to ioctl request buffer
+ *
+ *  @return		MLAN_STATUS_PENDING --success, otherwise fail
+ */
+static mlan_status
+wlan_fw_wakeup_method(IN pmlan_adapter pmadapter, IN pmlan_ioctl_req pioctl_req)
+{
+    mlan_private *pmpriv = pmadapter->priv[pioctl_req->bss_num];
+    mlan_status ret = MLAN_STATUS_SUCCESS;
+    t_u16 method;
+
+    ENTER();
+
+    if (pioctl_req->action == MLAN_ACT_GET) {
+        ((mlan_ds_pm_cfg *) pioctl_req->pbuf)->param.fw_wakeup_method =
+            pmadapter->fw_wakeup_method;
+        ret = MLAN_STATUS_SUCCESS;
+    } else {
+        /* Send command to firmware */
+        method =
+            (t_u16) ((mlan_ds_pm_cfg *) pioctl_req->pbuf)->param.
+            fw_wakeup_method;
+        ret =
+            wlan_prepare_cmd(pmpriv, HostCmd_CMD_802_11_FW_WAKE_METHOD,
+                             HostCmd_ACT_GEN_SET, 0, (t_void *) pioctl_req,
+                             &method);
+
+        if (ret == MLAN_STATUS_SUCCESS)
+            ret = MLAN_STATUS_PENDING;
+    }
+
+    LEAVE();
+    return ret;
+}
+
 /** 
  *  @brief Set/Get Inactivity timeout extend
  *
@@ -2399,6 +2438,9 @@ wlan_pm_ioctl(IN pmlan_adapter pmadapter, IN pmlan_ioctl_req pioctl_req)
         break;
     case MLAN_OID_PM_CFG_SLEEP_PD:
         status = wlan_set_get_sleep_pd(pmadapter, pioctl_req);
+        break;
+    case MLAN_OID_PM_CFG_FW_WAKEUP_METHOD:
+        status = wlan_fw_wakeup_method(pmadapter, pioctl_req);
         break;
     case MLAN_OID_PM_CFG_SLEEP_PARAMS:
         status = wlan_set_get_sleep_params(pmadapter, pioctl_req);

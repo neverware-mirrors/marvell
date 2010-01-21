@@ -2734,8 +2734,7 @@ woal_get_wireless_stats(struct net_device *dev)
      * is issued in non-blocking way in such contexts and
      * blocking in other cases.
      */
-    if (write_can_lock(&dev_base_lock)
-        && (!in_atomic() || current->exit_state))
+    if (write_can_lock(&dev_base_lock))
         wait_option = MOAL_WSTATS_WAIT;
 
     priv->w_stats.status = woal_get_mode(priv, wait_option);
