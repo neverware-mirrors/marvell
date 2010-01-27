@@ -12,6 +12,11 @@ Change log:
 #ifndef	_MLAN_SDIO_H
 #define	_MLAN_SDIO_H
 
+/** Block mode */
+#define BLOCK_MODE	1
+/** Fixed address mode */
+#define FIXED_ADDRESS	0
+
 /** Control register for BUS interface */
 #define BUS_INTERFACE_CONTROL_REG 	0x07
 
@@ -315,8 +320,4 @@ mlan_status wlan_host_to_card_mp_aggr(mlan_adapter * pmadapter,
 mlan_status wlan_sdio_host_to_card(mlan_adapter * pmadapter, t_u8 type,
                                    mlan_buffer * mbuf,
                                    mlan_tx_param * tx_param);
-mlan_status wlan_set_sdio_gpio_int(IN pmlan_private priv);
-mlan_status wlan_cmd_sdio_gpio_int(pmlan_private pmpriv,
-                                   IN HostCmd_DS_COMMAND * cmd,
-                                   IN t_u16 cmd_action, IN t_void * pdata_buf);
 #endif /* _MLAN_SDIO_H */

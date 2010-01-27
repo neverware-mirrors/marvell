@@ -7,8 +7,6 @@
  *
  *  Copyright (C) 2008-2009, Marvell International Ltd. 
  *  All Rights Reserved
- *
- *  @sa mlan_scan.h
  */
 
 /******************************************************
@@ -17,9 +15,7 @@ Change log:
 ******************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -1073,6 +1069,11 @@ wlan_ret_802_11_scan_get_tlv_ptrs(IN pmlan_adapter pmadapter,
         tlv_type = wlan_le16_to_cpu(pcurrent_tlv->header.type);
         tlv_len = wlan_le16_to_cpu(pcurrent_tlv->header.len);
 
+        if (sizeof(ptlv->header) + tlv_len > tlv_buf_left) {
+            PRINTM(MERROR, "SCAN_RESP: TLV buffer corrupt\n");
+            break;
+        }
+
         if (req_tlv_type == tlv_type) {
             switch (tlv_type) {
             case TLV_TYPE_TSFTIMESTAMP:
@@ -1094,7 +1095,7 @@ wlan_ret_802_11_scan_get_tlv_ptrs(IN pmlan_adapter pmadapter,
         }
 
         if (*pptlv) {
-            // HEXDUMP("SCAN_RESP: TLV Buf", (t_u8 *)*pptlv, tlv_len);
+            // HEXDUMP("SCAN_RESP: TLV Buf", (t_u8 *)*pptlv+4, tlv_len);
             break;
         }
 
@@ -1982,6 +1983,7 @@ wlan_scan_process_results(IN mlan_private * pmpriv)
                                    mac_address, pmpriv->bss_mode);
 
         if (j >= 0) {
+            pmadapter->callbacks.moal_spin_lock(pmpriv->curr_bcn_buf_lock);
             pmpriv->curr_bss_params.bss_descriptor.pwpa_ie = MNULL;
             pmpriv->curr_bss_params.bss_descriptor.wpa_offset = 0;
             pmpriv->curr_bss_params.bss_descriptor.prsn_ie = MNULL;
@@ -2008,6 +2010,11 @@ wlan_scan_process_results(IN mlan_private * pmpriv)
             memcpy(&pmpriv->curr_bss_params.bss_descriptor,
                    &pmadapter->pscan_table[j],
                    sizeof(pmpriv->curr_bss_params.bss_descriptor));
+
+            wlan_save_curr_bcn(pmpriv);
+            pmadapter->callbacks.moal_spin_unlock(pmpriv->curr_bcn_buf_lock);
+        } else {
+            wlan_restore_curr_bcn(pmpriv);
         }
     }
 
@@ -2620,6 +2627,7 @@ wlan_ret_802_11_scan(IN mlan_private * pmpriv,
                     radio_type_to_band(pchan_band->
                                        radio_type & (MBIT(0) | MBIT(1)));
             }
+
             /* Save the band designation for this entry for use in join */
             bss_new_entry->bss_band = band;
             cfp =
@@ -2675,6 +2683,7 @@ wlan_ret_802_11_scan(IN mlan_private * pmpriv,
                                      (pmlan_ioctl_req) pioctl_buf,
                                      MLAN_STATUS_SUCCESS);
         }
+        wlan_recv_event(pmpriv, MLAN_EVENT_ID_DRV_SCAN_REPORT, MNULL);
     } else {
         /* Get scan command from scan_pending_q and put to cmd_pending_q */
         pcmd_node =
@@ -3074,4 +3083,137 @@ wlan_cmd_append_vsie_tlv(IN mlan_private * pmpriv,
 
     LEAVE();
     return ret_len;
+}
+
+/**
+ *  @brief Save a beacon buffer of the current bss descriptor
+ *  Save the current beacon buffer to restore in the following cases that 
+ *  makes the bcn_buf not to contain the current ssid's beacon buffer.
+ *    - the current ssid was not found somehow in the last scan. 
+ *    - the current ssid was the last entry of the scan table and overloaded. 
+ *
+ *  @param pmpriv       A pointer to mlan_private structure
+ *
+ *  @return             n/a
+ */
+t_void
+wlan_save_curr_bcn(IN mlan_private * pmpriv)
+{
+    mlan_adapter *pmadapter = pmpriv->adapter;
+    mlan_callbacks *pcb = (pmlan_callbacks) & pmadapter->callbacks;
+    BSSDescriptor_t *pcurr_bss = &pmpriv->curr_bss_params.bss_descriptor;
+    mlan_status ret = MLAN_STATUS_SUCCESS;
+
+    /* save the beacon buffer if it is not saved or updated */
+    if ((pmpriv->pcurr_bcn_buf == MNULL) ||
+        (pmpriv->curr_bcn_size != pcurr_bss->beacon_buf_size) ||
+        (memcmp(pmpriv->pcurr_bcn_buf, pcurr_bss->pbeacon_buf,
+                pcurr_bss->beacon_buf_size))) {
+
+        if (pmpriv->pcurr_bcn_buf) {
+            pcb->moal_mfree(pmpriv->pcurr_bcn_buf);
+            pmpriv->pcurr_bcn_buf = MNULL;
+        }
+
+        pmpriv->curr_bcn_size = pcurr_bss->beacon_buf_size;
+        ret = pcb->moal_malloc(pcurr_bss->beacon_buf_size,
+                               &pmpriv->pcurr_bcn_buf);
+
+        if ((ret == MLAN_STATUS_SUCCESS) && pmpriv->pcurr_bcn_buf) {
+            memcpy(pmpriv->pcurr_bcn_buf, pcurr_bss->pbeacon_buf,
+                   pcurr_bss->beacon_buf_size);
+            PRINTM(MINFO, "current beacon saved %d\n", pmpriv->curr_bcn_size);
+        }
+    }
+}
+
+/**
+ *  @brief Restore a beacon buffer of the current bss descriptor
+ *
+ *  @param pmpriv       A pointer to mlan_private structure
+ *
+ *  @return             n/a
+ */
+t_void
+wlan_restore_curr_bcn(IN mlan_private * pmpriv)
+{
+    mlan_adapter *pmadapter = pmpriv->adapter;
+    mlan_callbacks *pcb = (pmlan_callbacks) & pmadapter->callbacks;
+    BSSDescriptor_t *pcurr_bss = &pmpriv->curr_bss_params.bss_descriptor;
+
+    if (pmpriv->pcurr_bcn_buf &&
+        ((pmadapter->pbcn_buf_end + pmpriv->curr_bcn_size) <
+         (pmadapter->bcn_buf + sizeof(pmadapter->bcn_buf)))) {
+
+        pcb->moal_spin_lock(pmpriv->curr_bcn_buf_lock);
+
+        /* restore the current beacon buffer */
+        memcpy(pmadapter->pbcn_buf_end, pmpriv->pcurr_bcn_buf,
+               pmpriv->curr_bcn_size);
+        pcurr_bss->pbeacon_buf = pmadapter->pbcn_buf_end;
+        pcurr_bss->beacon_buf_size = pmpriv->curr_bcn_size;
+        pmadapter->pbcn_buf_end += pmpriv->curr_bcn_size;
+
+        /* adjust the pointers in the current bss descriptor */
+        if (pcurr_bss->pwpa_ie) {
+            pcurr_bss->pwpa_ie = (IEEEtypes_VendorSpecific_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->wpa_offset);
+        }
+
+        if (pcurr_bss->prsn_ie) {
+            pcurr_bss->prsn_ie = (IEEEtypes_Generic_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->rsn_offset);
+        }
+
+        if (pcurr_bss->pht_cap) {
+            pcurr_bss->pht_cap = (IEEEtypes_HTCap_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->ht_cap_offset);
+        }
+
+        if (pcurr_bss->pht_info) {
+            pcurr_bss->pht_info = (IEEEtypes_HTInfo_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->ht_info_offset);
+        }
+
+        if (pcurr_bss->pbss_co_2040) {
+            pcurr_bss->pbss_co_2040 = (IEEEtypes_2040BSSCo_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->bss_co_2040_offset);
+        }
+
+        if (pcurr_bss->pext_cap) {
+            pcurr_bss->pext_cap = (IEEEtypes_ExtCap_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->ext_cap_offset);
+        }
+
+        if (pcurr_bss->poverlap_bss_scan_param) {
+            pcurr_bss->poverlap_bss_scan_param =
+                (IEEEtypes_OverlapBSSScanParam_t *)
+                (pcurr_bss->pbeacon_buf + pcurr_bss->overlap_bss_offset);
+        }
+
+        pcb->moal_spin_unlock(pmpriv->curr_bcn_buf_lock);
+
+        PRINTM(MINFO, "current beacon restored %d\n", pmpriv->curr_bcn_size);
+    } else {
+        PRINTM(MWARN, "curr_bcn_buf not saved or bcn_buf has no space\n");
+    }
+}
+
+/**
+ *  @brief Free a beacon buffer of the current bss descriptor
+ *
+ *  @param pmpriv       A pointer to mlan_private structure
+ *
+ *  @return             n/a
+ */
+t_void
+wlan_free_curr_bcn(IN mlan_private * pmpriv)
+{
+    mlan_adapter *pmadapter = pmpriv->adapter;
+    mlan_callbacks *pcb = (pmlan_callbacks) & pmadapter->callbacks;
+
+    if (pmpriv->pcurr_bcn_buf) {
+        pcb->moal_mfree(pmpriv->pcurr_bcn_buf);
+        pmpriv->pcurr_bcn_buf = MNULL;
+    }
 }

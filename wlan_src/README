@@ -14,10 +14,13 @@
 
 	a) Copy sd8786.bin | sd8787.bin | ... to /lib/firmware/mrvl/ directory, 
 	   create the directory if it doesn't exist. 
-	b) Install SDIO bus driver and WLAN driver,
-		./load sd8786 | sd8688 | ...
-	c) Uninstall WLAN driver and SDIO bus driver,
-		./unload
+	b) Install WLAN driver,
+		insmod mlan.ko
+		insmod sd8xxx.ko [helper_name=mrvl/helper_sd.bin] [fw_name=mrvl/sd8xxx.bin]
+	c) Uninstall WLAN driver,
+		ifconfig mlanX down
+		rmmod sd8xxx
+		rmmod mlan
 
 	To load driver with MFG firmware file, use mfg_mode=1 when insmod WLAN driver and 
 	specify MFG firmware name if needed.
@@ -100,12 +103,6 @@
 	lock_count = <number of lock used>
 
 	Use dmesg or cat /var/log/debug to check driver debug messages.
-	To log driver debug messages to file,
-	a) Edit /etc/syslog.conf, add one line "*.debug		/var/log/debug"
-	   on kernel 2.6.24 or later, edit /etc/rsyslog.conf instead
-	b) touch /var/log/debug (if the file doesn't exist)
-	c) service syslog restart
-	   on kernel 2.6.24 or later, service rsyslog restart
 
 	Update /proc/sys/kernel/printk to change message log levels.
 	For example,
@@ -143,7 +140,7 @@ SYNOPSIS
 	iwpriv mlanX mpactrl [tx_ena] [rx_ena] [tx_size] [rx_size] [tx_ports] [rx_ports]
 	iwpriv mlanX tideligtbl [N0] [N1] [N2] [N3] [N4] [N5] [N6] [N7]
 	iwpriv mlanX atimwindow [n]
-	iwpriv mlanX deepsleep [n] 
+	iwpriv mlanX deepsleep [n] [m]
 	iwpriv mlanX hscfg [condition [[GPIO# [gap]]]]
 	iwpriv mlanX hssetpara condition [GPIO# [gap]]
 	iwpriv mlanX deauth [n]
@@ -172,8 +169,7 @@ SYNOPSIS
 	iwpriv mlanX scancfg [t] [m] [p] [s] [a] [b]
 	iwpriv mlanX vsiecfg <action> <id> [<mask> [data1] ... [dataN]]
 	iwpriv mlanX sleeppd [n]
-	iwpriv mlanX pscfg [n1] [n2] [n3] [n4] [n5] [n6]
-        iwpriv mlanX fwwakeupmethod [n]
+	iwpriv mlanX pscfg [k] [d] [l] ...
 	iwpriv mlanX sleepparams [<p1> <p2> <p3> <p4> <p5> <p6>]
 	iwpriv mlanX authtype [n]
 
@@ -393,10 +389,10 @@ addbapara
 		1 - 65535 : Block Ack Timeout in us
 
 	where <n> is <txwinsize>
-	<txwinsize> - Buffer size for ADDBA request. (64 is recommended and default value)
+	<txwinsize> - Window size for ADDBA request. (32 is recommended and default value)
 
 	where <o> is <rxwinsize>
-	<rxwinsize> - Buffer size for ADDBA response. (16 is recommended value for most APs, 64
+	<rxwinsize> - Window size for ADDBA response. (16 is recommended value for most APs, 64
 			      is recommended for AP85)
 
 	eg:
@@ -564,7 +560,7 @@ mpactrl
 		                           : Enable MP aggregation for Tx, Rx
 		                           : Set Tx, Rx buffer size to 2048 bytes.
 		                           : Set maximum Tx ports to 5 and maximum Rx ports to 7.
-	default values are 1 1 8192 16384 8 8
+	default values are 0 0 4096 4096 8 8
 
 tideligtbl
 	This command is used to set/get number of available ports for transfer 
@@ -595,17 +591,21 @@ atimwindow
 		iwpriv mlan0 atimwindow         : Get atimwindow
 
 deepsleep
-	This command is used to set/get deep sleep mode.
-	Note: This command is available only when STA is in disconnected mode.
+	This command is used to set/get auto deep sleep mode.
 
-	where the option is:
-		1   -- Enable deep sleep mode
-		0   -- Disable deep sleep mode
+	Usage:
+		iwpriv mlanX deepsleep [n] [m]
+
+	where the parameters are:
+		[n]: Enable/disable auto deep sleep mode (1/0)
+		[m]: Idle time in milliseconds after which firmware will put the device 
+		     in deep sleep mode. Default value is 100 ms.
 
 	Examples:
-		iwpriv mlan0 deepsleep          : Display deep sleep mode
-		iwpriv mlan0 deepsleep 1        : Enable deep sleep mode
-		iwpriv mlan0 deepsleep 0        : Disable deep sleep mode
+		iwpriv mlan0 deepsleep          : Display auto deep sleep mode
+		iwpriv mlan0 deepsleep 1        : Enable auto deep sleep mode, idle time unchanged
+		iwpriv mlan0 deepsleep 0        : Disable auto deep sleep mode
+		iwpriv mlan0 deepsleep 1 500    : Enable auto deep sleep mode with idle time 500 ms
 
 hscfg
 	This command is used to configure the host sleep parameters.
@@ -728,6 +728,8 @@ bandcfg
 		     bit 0: B
 		     bit 1: G
 		     bit 2: A
+		     bit 3: GN
+		     bit 4: AN
 		[n]: Ad-hoc start channel 
 
 	Examples:
@@ -992,7 +994,7 @@ regrdwr
 		iwpriv mlanX regrdwr <type> <offset> [value]
 
 	where the parameters are,
-		<type>:     1:MAC, 2:BBP, 3:RF, 4: PMIC
+		<type>:     1:MAC/SOC, 2:BBP, 3:RF, 4:PMIC, 5:CAU
 		<offset>:   offset of register
 		[value]:    value to be written
 	Note: If highest bit of a 32-bit value needs to be set, use negitive input.
@@ -1158,14 +1160,18 @@ pscfg
 	This command is used to set/get PS configuration parameters.
 
 	Usage:
-		iwpriv mlanX pscfg [n1] [n2] [n3] [n4] [n5] [n6]
+		iwpriv mlanX pscfg [k] [d] [l] ...
 
 	Where the parameters:
-		[n1]: Keep alive null packet interval (0: Unchanged, -1: Disable, n: Interval in seconds)
-		[n2]: DTIM interval (0: Unchanged, 1-5: Value, 65534: DTIM will be ignored 
-		                     in firmware, listen interval will be used)
-		[n3]: Local listen interval (0: Unchanged, n: Interval)
-		[n5]: Beacon miss timeout (0: Unchanged, 1-50: Value in milliseconds, 65535: Disable)
+		[k]: Keep alive null packet interval (0: Unchanged, -1: Disable, n: Interval in seconds)
+		[d]: DTIM interval (0: Unchanged, 1-5: Value, 65534: DTIM will be ignored 
+		                    in firmware, listen interval will be used)
+		[l]: Local listen interval (0: Unchanged, n: Interval)
+		[a]: Ad-hoc awake period (0: Unchanged, 1-31: Beacon interval, 255: Firmware 
+		                          will go to sleep after beacon send out)
+		[b]: Beacon miss timeout (0: Unchanged, 1-50: Value in milliseconds, 65535: Disable)
+		[p]: Delay to PS (0-65535: Value in milliseconds)
+		[m]: PS mode (0: Unchanged, 1: Auto mode, 2: PS-Poll mode, 3: PS Null mode)
 	No change if parameters are not provided.
 
 	Examples:
@@ -1177,18 +1183,7 @@ pscfg
 		                                : Disable DTIM interval, set local listen interval to 
 		                                  10 beacon intervals and beacon miss interval to 20, 
 		                                  all the other configurations are unchanged
-
-fwwakeupmethod
-	This command is used to set/get the firmware wakeup method.
-
-	where value is:
-		1	-- Firmware wakeup through the interface command interrupt
-			-- (default setting for SDIO/GSPI)
-		2	-- Firmware wakeup through the GPIO pin
-
-	Examples:
-		iwpriv mlan0 fwwakeupmethod     : Get current firmware wakeup method
-		iwpriv mlan0 fwwakeupmethod 2   : Set firmware wakeup method to GPIO mode
+		iwpriv mlan0 pscfg 0 0 0 0 0 50 : Set delay to PS to 50 ms, keep the others unchanged
 
 sleepparams
 	This command is used to set the sleepclock configurations
@@ -1239,7 +1234,6 @@ mlanconfig <mlanX> <command> [parameters] ...
 mlanconfig mlanX hostcmd <bg_scan.conf> bgscfg
 mlanconfig mlanX hostcmd <requesttpc.conf> requesttpc
 mlanconfig mlanX hostcmd <crypto_test.conf> crypto_test
-mlanconfig mlanX hostcmd <mef.conf> mefcfg
 mlanconfig mlanX hostcmd <subevent.conf> subevent_get
 mlanconfig mlanX hostcmd <subevent.conf> subevent_set
 mlanconfig mlanX hostcmd <auto_tx.conf> auto_tx_get
@@ -1251,7 +1245,11 @@ mlanconfig mlanX hostcmd <txrate_cfg.conf> txrate_cfg_set_bgn
 mlanconfig mlanX hostcmd <txpwrlimit_cfg.conf> txpwrlimit_cfg_get
 mlanconfig mlanX hostcmd <txpwrlimit_cfg.conf> txpwrlimit_cfg_set
 mlanconfig mlanX hostcmd <11n_2040coex.conf> 2040coex
+mlanconfig mlanX hostcmd <robust_btc.conf> robust_btc_get
+mlanconfig mlanX hostcmd <robust_btc.conf> robust_btc_enable
+mlanconfig mlanX hostcmd <robust_btc.conf> robust_btc_disable
 mlanconfig mlanX arpfilter <arpfilter.conf>
+mlanconfig mlanX mefcfg <mef.conf>
 mlanconfig mlanX cfgdata <register type> <conf file>
 mlanconfig mlanX sdcmd52rw <FN no.> <address> [data]
 mlanconfig mlanX sdcmd53rw <FN no.> <address> <mode> <blksize> <blknum> [data1] ... [dataN]
@@ -1297,12 +1295,6 @@ hostcmd crypto_test
 
 	Usage:
 		mlanconfig mlanX hostcmd config/crypto_test.conf crypto_test
-
-hostcmd mefcfg
-	This command is used to set MEF settings.
-
-	Usage:
-		mlanconfig mlanX hostcmd config/mef.conf mefcfg
 
 hostcmd subevent_get
 hostcmd subevent_set
@@ -1354,11 +1346,30 @@ hostcmd 2040coex
 	Usage:
 		mlanconfig mlanX hostcmd config/11n_2040coex.conf 2040coex
 
+hostcmd robust_btc_get
+hostcmd robust_btc_enable
+hostcmd robust_btc_disable
+	This command is used to get/set Robust BT Coex.
+	robust_btc_get: get the current configuration
+	robust_btc_enable: enable and set the Robust BT Coex timing
+	robust_btc_disable: disable the Robust BT Coex
+
+	Usage:
+		mlanconfig mlanX hostcmd config/robust_btc.conf robust_btc_get
+		mlanconfig mlanX hostcmd config/robust_btc.conf robust_btc_enable
+		mlanconfig mlanX hostcmd config/robust_btc.conf robust_btc_disable
+
 arpfilter
 	This command is used to configure the ARP filtering parameters.
 
 	Usage:
 		mlanconfig mlanX arpfilter config/arpfilter.conf
+
+mefcfg
+	This command is used to set MEF settings.
+
+	Usage:
+		mlanconfig mlanX mefcfg config/mef.conf
 
 cfgdata
 	This command is used to set/get the configuration data to/from firmware.
@@ -1562,7 +1573,7 @@ regrdwr
 		mlanconfig mlanX regrdwr <type> <offset> [value]
 
 	where the parameters are,
-		<type>:     1:MAC, 2:BBP, 3:RF, 4: PMIC
+		<type>:     1:MAC/SOC, 2:BBP, 3:RF, 4:PMIC, 5:CAU
 		<offset>:   offset of register
 		[value]:    value to be written
 

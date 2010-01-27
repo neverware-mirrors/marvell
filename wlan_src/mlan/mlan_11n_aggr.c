@@ -12,14 +12,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
-#include "mlan_rx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 #include "mlan_11n_aggr.h"
@@ -102,7 +98,6 @@ wlan_11n_form_amsdu_txpd(mlan_private * priv, mlan_buffer * mbuf)
 {
     TxPD *ptx_pd;
     mlan_adapter *pmadapter = priv->adapter;
-
     ENTER();
 
     ptx_pd = (TxPD *) mbuf->pbuf;
@@ -114,14 +109,12 @@ wlan_11n_form_amsdu_txpd(mlan_private * priv, mlan_buffer * mbuf)
     ptx_pd->priority = (t_u8) mbuf->priority;
     ptx_pd->pkt_delay_2ms = wlan_wmm_compute_driver_packet_delay(priv, mbuf);
     ptx_pd->bss_num = (t_u8) mbuf->bss_num;
-
-    if (pmadapter->ps_state != PS_STATE_FULL_POWER) {
+    if (pmadapter->ps_state != PS_STATE_AWAKE) {
         if (MTRUE == wlan_check_last_packet_indication(priv)) {
             pmadapter->tx_lock_flag = MTRUE;
             ptx_pd->flags = MRVDRV_TxPD_POWER_MGMT_LAST_PACKET;
         }
     }
-
     /* Always zero as the data is followed by TxPD */
     ptx_pd->tx_pkt_offset = sizeof(TxPD);
     ptx_pd->tx_pkt_type = PKT_TYPE_AMSDU;
@@ -263,7 +256,7 @@ wlan_11n_deaggregate_pkt(mlan_private * priv, pmlan_buffer pmbuf)
         daggr_mbuf->pbuf = data;
         daggr_mbuf->pdesc = MNULL;
         daggr_mbuf->pparent = pmbuf;
-
+        daggr_mbuf->priority = pmbuf->priority;
         ret =
             pmadapter->callbacks.moal_recv_packet(pmadapter->pmoal_handle,
                                                   daggr_mbuf);
@@ -339,12 +332,13 @@ wlan_11n_aggregate_pkt(mlan_private * priv, raListTbl * pra_list,
 
         /* Form AMSDU */
         wlan_11n_form_amsdu_txpd(priv, pmbuf_aggr);
-        pkt_size = sizeof(TxPD) + headroom;
+        pkt_size = sizeof(TxPD);
     } else {
         goto exit;
     }
 
-    while (pmbuf_src && ((pkt_size + (pmbuf_src->data_len + LLC_SNAP_LEN))
+    while (pmbuf_src && ((pkt_size + (pmbuf_src->data_len + LLC_SNAP_LEN)
+                          + headroom)
                          <= pmadapter->tx_buf_size)) {
 
         pmbuf_src = (pmlan_buffer)
@@ -387,6 +381,7 @@ wlan_11n_aggregate_pkt(mlan_private * priv, raListTbl * pra_list,
     pkt_size -= pad;
     pmbuf_aggr->data_len = pkt_size;
     wlan_11n_update_pktlen_amsdu_txpd(pmadapter, pmbuf_aggr);
+    pmbuf_aggr->data_len += headroom;
     pmbuf_aggr->pbuf = data - headroom;
     tx_param.next_pkt_len = ((pra_list->total_pkts_size) ?
                              (((pra_list->total_pkts_size) >
@@ -448,5 +443,5 @@ wlan_11n_aggregate_pkt(mlan_private * priv, raListTbl * pra_list,
 
   exit:
     LEAVE();
-    return pkt_size;
+    return (pkt_size + headroom);
 }

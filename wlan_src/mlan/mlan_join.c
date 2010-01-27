@@ -18,9 +18,7 @@ Change log:
 ******************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -805,6 +803,8 @@ wlan_ret_802_11_associate(IN mlan_private * pmpriv,
     pmpriv->rxpd_rate = 0;
     pmpriv->rxpd_htinfo = 0;
 
+    wlan_save_curr_bcn(pmpriv);
+
     pmpriv->adapter->dbg.num_cmd_assoc_success++;
 
     PRINTM(MINFO, "ASSOC_RESP: Associated\n");
@@ -864,6 +864,8 @@ wlan_cmd_802_11_ad_hoc_start(IN mlan_private * pmpriv,
     MrvlIEtypes_ChanListParamSet_t *pchan_tlv;
 
     MrvlIEtypes_RsnParamSet_t *prsn_ie_tlv;
+    MrvlIETypes_HTCap_t *pht_cap;
+    MrvlIETypes_HTInfo_t *pht_info;
     /* wpa ie for WPA_NONE AES */
     const t_u8 wpa_ie[24] = { 0xdd, 0x16, 0x00, 0x50, 0xf2, 0x01, 0x01, 0x00,
         0x00, 0x50, 0xf2, 0x04, 0x01, 0x00, 0x00, 0x50,
@@ -1086,6 +1088,47 @@ wlan_cmd_802_11_ad_hoc_start(IN mlan_private * pmpriv,
         cmd_append_size +=
             sizeof(prsn_ie_tlv->header) + prsn_ie_tlv->header.len;
         prsn_ie_tlv->header.len = wlan_cpu_to_le16(prsn_ie_tlv->header.len);
+    }
+
+    if (pmadapter->adhoc_11n_enabled == MTRUE) {
+        {
+            pht_cap = (MrvlIETypes_HTCap_t *) pos;
+            memset(pht_cap, 0, sizeof(MrvlIETypes_HTCap_t));
+            pht_cap->header.type = wlan_cpu_to_le16(HT_CAPABILITY);
+            pht_cap->header.len = sizeof(HTCap_t);
+            SETHT_SUPPCHANWIDTH(pht_cap->ht_cap.ht_cap_info);
+            SETHT_GREENFIELD(pht_cap->ht_cap.ht_cap_info);
+            SETHT_SHORTGI20(pht_cap->ht_cap.ht_cap_info);
+            SETHT_SHORTGI40(pht_cap->ht_cap.ht_cap_info);
+            SETHT_MAXAMSDU(pht_cap->ht_cap.ht_cap_info);
+            SETHT_DSSSCCK40(pht_cap->ht_cap.ht_cap_info);
+            pht_cap->ht_cap.ampdu_param = MAX_RX_AMPDU_SIZE_64K;
+            pht_cap->ht_cap.supported_mcs_set[0] = 0xff;
+            HEXDUMP("ADHOC_START: HT_CAPABILITIES IE", (t_u8 *) pht_cap,
+                    sizeof(MrvlIETypes_HTCap_t));
+            pos += sizeof(MrvlIETypes_HTCap_t);
+            cmd_append_size += sizeof(MrvlIETypes_HTCap_t);
+            pht_cap->header.len = wlan_cpu_to_le16(pht_cap->header.len);
+        }
+        {
+            pht_info = (MrvlIETypes_HTInfo_t *) pos;
+            memset(pht_info, 0, sizeof(MrvlIETypes_HTInfo_t));
+            pht_info->header.type = wlan_cpu_to_le16(HT_OPERATION);
+            pht_info->header.len = sizeof(HTInfo_t);
+            pht_info->ht_info.pri_chan =
+                (t_u8) pmpriv->curr_bss_params.bss_descriptor.channel;
+            if (pmadapter->chan_offset) {
+                pht_info->ht_info.field2 = pmadapter->chan_offset;
+                SET_CHANWIDTH40(pht_info->ht_info.field2);
+            }
+            pht_info->ht_info.field3 = NON_GREENFIELD_STAS;
+            pht_info->ht_info.basic_mcs_set[0] = 0xff;
+            HEXDUMP("ADHOC_START: HT_INFORMATION IE", (t_u8 *) pht_info,
+                    sizeof(MrvlIETypes_HTInfo_t));
+            pos += sizeof(MrvlIETypes_HTInfo_t);
+            cmd_append_size += sizeof(MrvlIETypes_HTInfo_t);
+            pht_info->header.len = wlan_cpu_to_le16(pht_info->header.len);
+        }
     }
 
     cmd->size =
@@ -1330,6 +1373,9 @@ wlan_cmd_802_11_ad_hoc_join(IN mlan_private * pmpriv,
         }
     }
 
+    if (ISSUPP_11NENABLED(pmpriv->adapter->fw_cap_info))
+        cmd_append_size += wlan_cmd_append_11n_tlv(pmpriv, pbss_desc, &pos);
+
     /** Append vendor specific IE TLV */
     cmd_append_size +=
         wlan_cmd_append_vsie_tlv(pmpriv, MLAN_VSIE_MASK_ADHOC, &pos);
@@ -1438,6 +1484,7 @@ wlan_ret_802_11_ad_hoc(IN mlan_private * pmpriv,
            (t_u8 *) pmpriv->curr_bss_params.bss_descriptor.mac_address,
            MLAN_MAC_ADDR_LENGTH);
     wlan_recv_event(pmpriv, MLAN_EVENT_ID_DRV_CONNECTED, pevent);
+    wlan_save_curr_bcn(pmpriv);
 
   done:
     /* Need to indicate IOCTL complete */
@@ -1512,7 +1559,9 @@ wlan_adhoc_start(IN mlan_private * pmpriv,
     ENTER();
 
     if ((pmpriv->adhoc_auto_sel)
-        && (pmadapter->adhoc_start_band == BAND_A)
+        && ((pmadapter->adhoc_start_band & BAND_A)
+            || (pmadapter->adhoc_start_band & BAND_AN)
+        )
         ) {
         pmpriv->adhoc_channel = wlan_11h_get_adhoc_start_channel(pmpriv);
 

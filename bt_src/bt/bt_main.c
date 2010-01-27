@@ -35,7 +35,7 @@
 #include "include.h"
 
 /** Version */
-#define VERSION "1.41"
+#define VERSION "1.42"
 
 /** Driver version */
 char driver_version[] = "sd8787-" VERSION "-(" "FP" FPNUM ")" " ";
@@ -206,6 +206,12 @@ bt_send_module_cfg_cmd(bt_private * priv, int subcmd)
     priv->adapter->cmd_complete = FALSE;
     PRINTM(CMD, "Queue module cfg Command\n");
     wake_up_interruptible(&priv->MainThread.waitQ);
+    /* 
+       On some Adroind platforms certain delay is needed for HCI daemon to
+       remove this module and close itself gracefully. Otherwise it hangs. This 
+       10ms delay is a workaround for such platforms as the root cause has not
+       been found yet. */
+    mdelay(10);
     if (!os_wait_interruptible_timeout
         (priv->adapter->cmd_wait_q, priv->adapter->cmd_complete,
          WAIT_UNTIL_CMD_RESP)) {
@@ -701,6 +707,7 @@ bt_add_card(void *card)
     priv->bt_dev.card = card;
     btpriv = priv;
     hdev->driver_data = priv;
+    ((struct sdio_mmc_card *) card)->priv = priv;
     /* 
      * Register the device. Fillup the private data structure with
      * relevant information from the card and request for the required
@@ -750,6 +757,7 @@ bt_add_card(void *card)
   err_init_fw:
     sbi_unregister_dev(priv);
   err_registerdev:
+    ((struct sdio_mmc_card *) card)->priv = NULL;
     /* Stop the thread servicing the interrupts */
     priv->adapter->SurpriseRemoved = TRUE;
     wake_up_interruptible(&priv->MainThread.waitQ);
@@ -777,7 +785,7 @@ int
 bt_remove_card(void *card)
 {
     struct hci_dev *hdev;
-    bt_private *priv = btpriv;
+    bt_private *priv = ((struct sdio_mmc_card *) card)->priv;
 
     ENTER();
 

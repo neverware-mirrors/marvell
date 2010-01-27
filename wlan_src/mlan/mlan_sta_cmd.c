@@ -15,13 +15,10 @@ Change log:
 ******************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 #include "mlan_11h.h"
@@ -30,16 +27,6 @@ Change log:
 /********************************************************
                 Local Variables
 ********************************************************/
-
-/** List of commands allowed in Power Save mode */
-static t_u16 commands_allowed_in_ps[] = {
-    HostCmd_CMD_RSSI_INFO,
-    HostCmd_CMD_MAC_CONTROL,
-    HostCmd_CMD_MAC_MULTICAST_ADR,
-    HostCmd_CMD_802_11_MAC_ADDRESS,
-    HostCmd_CMD_802_11_HOST_SLEEP_CFG,
-    HostCmd_CMD_802_11_WAKEUP_CONFIRM,
-};
 
 /********************************************************
                 Global Variables
@@ -415,7 +402,7 @@ wlan_cmd_tx_power_cfg(IN pmlan_private pmpriv,
 }
 
 /** 
- * @brief This function prepares command of ps_mode.
+ * @brief This function prepares command of enhanced ps_mode.
  *   
  * @param pmpriv       A pointer to mlan_private structure
  * @param cmd          A pointer to HostCmd_DS_COMMAND structure
@@ -425,44 +412,71 @@ wlan_cmd_tx_power_cfg(IN pmlan_private pmpriv,
  * @return             MLAN_STATUS_SUCCESS
  */
 static mlan_status
-wlan_cmd_802_11_ps_mode(IN pmlan_private pmpriv,
-                        IN HostCmd_DS_COMMAND * cmd,
-                        IN t_u16 cmd_action, IN t_void * pdata_buf)
+wlan_cmd_802_11_opt_ps_mode(IN pmlan_private pmpriv,
+                            IN HostCmd_DS_COMMAND * cmd,
+                            IN t_u16 cmd_action, IN t_void * pdata_buf)
 {
     pmlan_adapter pmadapter = pmpriv->adapter;
-    HostCmd_DS_802_11_PS_MODE *pps_mode = &cmd->params.ps_mode;
 
     ENTER();
 
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_PS_MODE);
-    cmd->size = wlan_cpu_to_le16(S_DS_GEN + sizeof(HostCmd_DS_802_11_PS_MODE));
-    pps_mode->action = wlan_cpu_to_le16(cmd_action);
-    pps_mode->multiple_dtim = 0;
+    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_PS_MODE_ENH);
+    cmd->size =
+        wlan_cpu_to_le16(S_DS_GEN + sizeof(HostCmd_DS_802_11_PS_MODE_ENH));
+    ((HostCmd_DS_802_11_PS_MODE_ENH *) (&cmd->params.psmode_enh))->action =
+        wlan_cpu_to_le16(cmd_action);
 
     switch (cmd_action) {
-    case HostCmd_SubCmd_Enter_PS:
-        PRINTM(MCMND, "PS Command:" "SubCode- Enter PS\n");
+    case EN_PS:
+        {
+            ps_param *pps_mode = &cmd->params.psmode_enh.params.opt_ps;
+            PRINTM(MCMND, "PS Command: Enter PS\n");
 
-        pps_mode->local_listen_interval =
-            wlan_cpu_to_le16(pmadapter->local_listen_interval);
-        pps_mode->null_pkt_interval =
-            wlan_cpu_to_le16(pmadapter->null_pkt_interval);
-        pps_mode->multiple_dtim = wlan_cpu_to_le16(pmadapter->multiple_dtim);
-        pps_mode->bcn_miss_time_out =
-            wlan_cpu_to_le16(pmadapter->bcn_miss_time_out);
+            pps_mode->null_pkt_interval =
+                wlan_cpu_to_le16(pmadapter->null_pkt_interval);
+            pps_mode->multiple_dtims =
+                wlan_cpu_to_le16(pmadapter->multiple_dtim);
+            pps_mode->bcn_miss_timeout =
+                wlan_cpu_to_le16(pmadapter->bcn_miss_time_out);
+            pps_mode->local_listen_interval =
+                wlan_cpu_to_le16(pmadapter->local_listen_interval);
+            pps_mode->adhoc_wake_period =
+                wlan_cpu_to_le16(pmadapter->adhoc_awake_period);
+            pps_mode->delay_to_ps = wlan_cpu_to_le16(pmadapter->delay_to_ps);
+            pps_mode->mode = wlan_cpu_to_le16(pmadapter->enhanced_ps_mode);
+            break;
+        }
+    case DIS_PS:
+        PRINTM(MCMND, "PS Command: Exit PS\n");
         break;
-    case HostCmd_SubCmd_Exit_PS:
-        PRINTM(MCMND, "PS Command:" "SubCode- Exit PS\n");
+    case EN_AUTO_DS:
+        {
+            t_u16 idletime = 0;
+            auto_ds_param *pps_mode = &cmd->params.psmode_enh.params.auto_ds;
+            if (pdata_buf) {
+                idletime = ((mlan_ds_auto_ds *) pdata_buf)->idletime;
+            }
+
+            PRINTM(MCMND, "PS Command: Enter Auto Deep Sleep\n");
+            pps_mode->deep_sleep_timeout = wlan_cpu_to_le16(idletime);
+            break;
+        }
+    case DIS_AUTO_DS:
+        PRINTM(MCMND, "PS Command: Exit Auto Deep Sleep\n");
         break;
-    case HostCmd_SubCmd_Sleep_Confirmed:
-        PRINTM(MCMND, "PS Command: SubCode- sleep confirm\n");
-        break;
+    case SLEEP_CONFIRM:
+        {
+            sleep_confirm_param *pps_mode =
+                &cmd->params.psmode_enh.params.sleep_cfm;
+            PRINTM(MCMND, "PS Command: Sleep Confirm\n");
+
+            pps_mode->resp_ctrl = wlan_cpu_to_le16(RESP_NEEDED);
+            break;
+        }
     default:
         break;
     }
 
-    PRINTM(MCMND, "PS_MODE_CMD: Size:%d Cmd:0x%x Act:%d\n",
-           cmd->size, cmd->command, pps_mode->action);
     LEAVE();
     return MLAN_STATUS_SUCCESS;
 }
@@ -481,72 +495,48 @@ static mlan_status
 wlan_cmd_802_11_hs_cfg(IN pmlan_private pmpriv,
                        IN HostCmd_DS_COMMAND * cmd,
                        IN t_u16 cmd_action,
-                       IN HostCmd_DS_802_11_HOST_SLEEP_CFG * pdata_buf)
+                       IN HostCmd_DS_802_11_HS_CFG_ENH * pdata_buf)
 {
     pmlan_adapter pmadapter = pmpriv->adapter;
-    HostCmd_DS_802_11_HOST_SLEEP_CFG *phs_cfg = &cmd->params.hs_cfg;
+    HostCmd_DS_802_11_HS_CFG_ENH *phs_cfg = &cmd->params.opt_hs_cfg;
+    t_u16 hs_activate = MFALSE;
 
     ENTER();
 
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_HOST_SLEEP_CFG);
+    if (pdata_buf == MNULL) {
+        /* New Activate command */
+        hs_activate = MTRUE;
+    }
+    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_HS_CFG_ENH);
 
-    if ((pdata_buf->conditions != HOST_SLEEP_CFG_CANCEL)
+    if (!hs_activate &&
+        (pdata_buf->params.hs_config.conditions != HOST_SLEEP_CFG_CANCEL)
         && ((pmadapter->arp_filter_size > 0)
             && (pmadapter->arp_filter_size <= ARP_FILTER_MAX_BUF_SIZE))) {
         PRINTM(MCMND, "Attach %d bytes ArpFilter to HSCfg cmd\n",
                pmadapter->arp_filter_size);
-        memcpy(((t_u8 *) phs_cfg) + sizeof(HostCmd_DS_802_11_HOST_SLEEP_CFG),
+        memcpy(((t_u8 *) phs_cfg) + sizeof(HostCmd_DS_802_11_HS_CFG_ENH),
                pmadapter->arp_filter, pmadapter->arp_filter_size);
         cmd->size =
             (t_u16) wlan_cpu_to_le16(pmadapter->arp_filter_size +
-                                     sizeof(HostCmd_DS_802_11_HOST_SLEEP_CFG) +
+                                     sizeof(HostCmd_DS_802_11_HS_CFG_ENH) +
                                      S_DS_GEN);
     } else
         cmd->size =
-            wlan_cpu_to_le16(S_DS_GEN +
-                             sizeof(HostCmd_DS_802_11_HOST_SLEEP_CFG));
+            wlan_cpu_to_le16(S_DS_GEN + sizeof(HostCmd_DS_802_11_HS_CFG_ENH));
 
-    phs_cfg->conditions = wlan_cpu_to_le32(pdata_buf->conditions);
-    phs_cfg->gpio = pdata_buf->gpio;
-    phs_cfg->gap = pdata_buf->gap;
-    PRINTM(MCMND, "HS_CFG_CMD: condition:0x%x gpio:0x%x gap:0x%x\n",
-           pdata_buf->conditions, pdata_buf->gpio, pdata_buf->gap);
-
-    LEAVE();
-    return MLAN_STATUS_SUCCESS;
-}
-
-/**
- * @brief This function prepares command of fw_wakeup_method.
- *
- * @param pmpriv       A pointer to mlan_private structure
- * @param cmd          A pointer to HostCmd_DS_COMMAND structure
- * @param cmd_action   The action: GET or SET
- * @param pdata_buf    A pointer to data buffer
- *
- * @return             MLAN_STATUS_SUCCESS
- */
-static mlan_status
-wlan_cmd_802_11_fw_wakeup_method(IN pmlan_private pmpriv,
-                                 IN HostCmd_DS_COMMAND * cmd,
-                                 IN t_u16 cmd_action, IN t_u16 * pdata_buf)
-{
-    HostCmd_DS_802_11_FW_WAKEUP_METHOD *fwwm = &cmd->params.fwwakeupmethod;
-
-    ENTER();
-
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_802_11_FW_WAKE_METHOD);
-    cmd->size =
-        wlan_cpu_to_le16(sizeof(HostCmd_DS_802_11_FW_WAKEUP_METHOD) + S_DS_GEN);
-    fwwm->action = wlan_cpu_to_le16(cmd_action);
-    switch (cmd_action) {
-    case HostCmd_ACT_GEN_SET:
-        fwwm->method = wlan_cpu_to_le16(*pdata_buf);
-        break;
-    case HostCmd_ACT_GEN_GET:
-    default:
-        fwwm->method = WAKEUP_FW_UNCHANGED;
-        break;
+    if (hs_activate) {
+        phs_cfg->action = HS_ACTIVATE;
+        phs_cfg->params.hs_activate.resp_ctrl = RESP_NEEDED;
+    } else {
+        phs_cfg->action = HS_CONFIGURE;
+        phs_cfg->params.hs_config.conditions =
+            wlan_cpu_to_le32(pdata_buf->params.hs_config.conditions);
+        phs_cfg->params.hs_config.gpio = pdata_buf->params.hs_config.gpio;
+        phs_cfg->params.hs_config.gap = pdata_buf->params.hs_config.gap;
+        PRINTM(MCMND, "HS_CFG_CMD: condition:0x%x gpio:0x%x gap:0x%x\n",
+               phs_cfg->params.hs_config.conditions,
+               phs_cfg->params.hs_config.gpio, phs_cfg->params.hs_config.gap);
     }
 
     LEAVE();
@@ -962,6 +952,7 @@ wlan_cmd_802_11_key_material(IN pmlan_private pmpriv,
         key_param_len =
             (t_u16) (pkey->key_len + KEYPARAMSET_FIXED_LEN) +
             sizeof(MrvlIEtypesHeader_t);
+
         cmd->size =
             wlan_cpu_to_le16(key_param_len + sizeof(pkey_material->action) +
                              S_DS_GEN);
@@ -1131,7 +1122,9 @@ wlan_cmd_802_11_rf_channel(IN pmlan_private pmpriv,
                                  + S_DS_GEN);
 
     if (cmd_action == HostCmd_ACT_GEN_SET) {
-        if (pmpriv->adapter->adhoc_start_band == BAND_A)
+        if ((pmpriv->adapter->adhoc_start_band & BAND_A)
+            || (pmpriv->adapter->adhoc_start_band & BAND_AN)
+            )
             prf_chan->rf_type = HostCmd_SCAN_RADIO_TYPE_A;
         SET_SECONDARYCHAN(prf_chan->rf_type, pmpriv->adapter->chan_offset);
         prf_chan->rf_type = wlan_cpu_to_le16(prf_chan->rf_type);
@@ -1304,83 +1297,6 @@ wlan_cmd_sysclock_cfg(IN pmlan_private pmpriv,
 }
 
 /** 
- *  @brief This function prepares command of reconfigure tx buf
- *  
- *  @param priv         A pointer to mlan_private structure
- *  @param cmd          A pointer to HostCmd_DS_COMMAND structure
- *  @param cmd_action   The action: GET or SET
- *  @param pdata_buf    A pointer to data buffer
- *
- *  @return             MLAN_STATUS_SUCCESS
- */
-static mlan_status
-wlan_cmd_recfg_tx_buf(mlan_private * priv,
-                      HostCmd_DS_COMMAND * cmd, int cmd_action, void *pdata_buf)
-{
-    HostCmd_DS_TXBUF_CFG *ptx_buf = &cmd->params.tx_buf;
-    t_u16 action = (t_u16) cmd_action;
-    t_u16 buf_size = *((t_u16 *) pdata_buf);
-
-    ENTER();
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_RECONFIGURE_TX_BUFF);
-    cmd->size = wlan_cpu_to_le16(sizeof(HostCmd_DS_TXBUF_CFG)
-                                 + S_DS_GEN);
-    ptx_buf->action = wlan_cpu_to_le16(action);
-    switch (action) {
-    case HostCmd_ACT_GEN_SET:
-        PRINTM(MCMND, "set tx_buf=%d\n", buf_size);
-        ptx_buf->buff_size = wlan_cpu_to_le16(buf_size);
-        break;
-    case HostCmd_ACT_GEN_GET:
-    default:
-        ptx_buf->buff_size = 0;
-        break;
-    }
-    LEAVE();
-    return MLAN_STATUS_SUCCESS;
-}
-
-/** 
- *  @brief This function prepares command of amsdu aggr control
- *  
- *  @param priv         A pointer to mlan_private structure
- *  @param cmd          A pointer to HostCmd_DS_COMMAND structure
- *  @param cmd_action   The action: GET or SET
- *  @param pdata_buf    A pointer to data buffer
- *
- *  @return             MLAN_STATUS_SUCCESS
- */
-static mlan_status
-wlan_cmd_amsdu_aggr_ctrl(mlan_private * priv,
-                         HostCmd_DS_COMMAND * cmd,
-                         int cmd_action, void *pdata_buf)
-{
-    HostCmd_DS_AMSDU_AGGR_CTRL *pamsdu_ctrl = &cmd->params.amsdu_aggr_ctrl;
-    t_u16 action = (t_u16) cmd_action;
-    mlan_ds_11n_amsdu_aggr_ctrl *aa_ctrl = (mlan_ds_11n_amsdu_aggr_ctrl *)
-        pdata_buf;
-
-    ENTER();
-
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_AMSDU_AGGR_CTRL);
-    cmd->size = wlan_cpu_to_le16(sizeof(HostCmd_DS_AMSDU_AGGR_CTRL)
-                                 + S_DS_GEN);
-    pamsdu_ctrl->action = wlan_cpu_to_le16(action);
-    switch (action) {
-    case HostCmd_ACT_GEN_SET:
-        pamsdu_ctrl->enable = wlan_cpu_to_le16(aa_ctrl->enable);
-        pamsdu_ctrl->curr_buf_size = 0;
-        break;
-    case HostCmd_ACT_GEN_GET:
-    default:
-        pamsdu_ctrl->curr_buf_size = 0;
-        break;
-    }
-    LEAVE();
-    return MLAN_STATUS_SUCCESS;
-}
-
-/** 
  *  @brief This function prepares command of reg_access.
  *  
  *  @param cmd          A pointer to HostCmd_DS_COMMAND structure
@@ -1440,6 +1356,17 @@ wlan_cmd_reg_access(IN HostCmd_DS_COMMAND * cmd,
             pmic_reg->action = wlan_cpu_to_le16(cmd_action);
             pmic_reg->offset = wlan_cpu_to_le16((t_u16) reg_rw->offset);
             pmic_reg->value = (t_u8) reg_rw->value;
+            break;
+        }
+    case HostCmd_CMD_CAU_REG_ACCESS:
+        {
+            HostCmd_DS_RF_REG_ACCESS *cau_reg;
+            cmd->size =
+                wlan_cpu_to_le16(sizeof(HostCmd_DS_RF_REG_ACCESS) + S_DS_GEN);
+            cau_reg = (HostCmd_DS_RF_REG_ACCESS *) & cmd->params.rf_reg;
+            cau_reg->action = wlan_cpu_to_le16(cmd_action);
+            cau_reg->offset = wlan_cpu_to_le16((t_u16) reg_rw->offset);
+            cau_reg->value = (t_u8) reg_rw->value;
             break;
         }
     case HostCmd_CMD_802_11_EEPROM_ACCESS:
@@ -1575,71 +1502,6 @@ wlan_cmd_802_11_bca_timeshare(pmlan_private pmpriv,
 /********************************************************
                 Global Functions
 ********************************************************/
-/** 
- *  @brief This function checks if a command is allowed
- *              in PS mode or not.
- *  
- *  @param pmadapter    A pointer to mlan_adapter structure
- *  @param command              The command ID
- *
- *  @return             MTRUE or MFALSE
- */
-t_u8
-wlan_is_cmd_allowed_in_ps(pmlan_adapter pmadapter, t_u16 command)
-{
-    t_u32 count = sizeof(commands_allowed_in_ps)
-        / sizeof(commands_allowed_in_ps[0]);
-    t_u32 i;
-
-    ENTER();
-
-    for (i = 0; i < count; i++)
-        if (command == wlan_cpu_to_le16(commands_allowed_in_ps[i])) {
-            LEAVE();
-            return MTRUE;
-        }
-
-    LEAVE();
-    return MFALSE;
-}
-
-/**
- *  @brief This function sends Enter_PS command to firmware.
- *
- *  @param priv         A pointer to mlan_private structure
- *
- *  @return             N/A
- */
-t_void
-wlan_enter_ps(pmlan_private priv)
-{
-    ENTER();
-
-    wlan_prepare_cmd(priv, HostCmd_CMD_802_11_PS_MODE,
-                     HostCmd_SubCmd_Enter_PS, 0, MNULL, MNULL);
-
-    LEAVE();
-    return;
-}
-
-/**
- *  @brief This function sends Exit_PS command to firmware.
- *
- *  @param priv         A pointer to mlan_private structure
- *
- *  @return             N/A
- */
-t_void
-wlan_exit_ps(pmlan_private priv)
-{
-    ENTER();
-
-    wlan_prepare_cmd(priv, HostCmd_CMD_802_11_PS_MODE,
-                     HostCmd_SubCmd_Exit_PS, 0, MNULL, MNULL);
-
-    LEAVE();
-    return;
-}
 
 /** 
  *  @brief This function prepare the command before sending to firmware.
@@ -1690,28 +1552,14 @@ mlan_sta_prepare_cmd(IN t_void * priv,
     case HostCmd_CMD_TXPWR_CFG:
         ret = wlan_cmd_tx_power_cfg(pmpriv, cmd_ptr, cmd_action, pdata_buf);
         break;
-    case HostCmd_CMD_802_11_PS_MODE:
-        ret = wlan_cmd_802_11_ps_mode(pmpriv, cmd_ptr, cmd_action, pdata_buf);
+    case HostCmd_CMD_802_11_PS_MODE_ENH:
+        ret =
+            wlan_cmd_802_11_opt_ps_mode(pmpriv, cmd_ptr, cmd_action, pdata_buf);
         break;
-    case HostCmd_CMD_802_11_HOST_SLEEP_CFG:
+    case HostCmd_CMD_802_11_HS_CFG_ENH:
         ret = wlan_cmd_802_11_hs_cfg(pmpriv, cmd_ptr, cmd_action,
-                                     (HostCmd_DS_802_11_HOST_SLEEP_CFG *)
+                                     (HostCmd_DS_802_11_HS_CFG_ENH *)
                                      pdata_buf);
-        break;
-    case HostCmd_CMD_802_11_WAKEUP_CONFIRM:
-    case HostCmd_CMD_802_11_HOST_SLEEP_ACTIVATE:
-        cmd_ptr->command = wlan_cpu_to_le16(cmd_no);
-        cmd_ptr->size = wlan_cpu_to_le16(S_DS_GEN);
-        break;
-    case HostCmd_CMD_802_11_FW_WAKE_METHOD:
-        ret = wlan_cmd_802_11_fw_wakeup_method(pmpriv, cmd_ptr,
-                                               cmd_action, (t_u16 *) pdata_buf);
-        break;
-    case HostCmd_CMD_802_11_DEEP_SLEEP:
-        cmd_ptr->command = wlan_cpu_to_le16(cmd_no);
-        cmd_ptr->size = wlan_cpu_to_le16((t_u16)
-                                         (sizeof
-                                          (HostCmd_DS_802_11_DEEP_SLEEP)));
         break;
     case HostCmd_CMD_802_11_SLEEP_PERIOD:
         ret = wlan_cmd_802_11_sleep_period(pmpriv, cmd_ptr,
@@ -1868,6 +1716,7 @@ mlan_sta_prepare_cmd(IN t_void * priv,
     case HostCmd_CMD_BBP_REG_ACCESS:
     case HostCmd_CMD_RF_REG_ACCESS:
     case HostCmd_CMD_PMIC_REG_ACCESS:
+    case HostCmd_CMD_CAU_REG_ACCESS:
     case HostCmd_CMD_802_11_EEPROM_ACCESS:
         ret = wlan_cmd_reg_access(cmd_ptr, cmd_action, pdata_buf);
         break;
@@ -1881,9 +1730,6 @@ mlan_sta_prepare_cmd(IN t_void * priv,
         ret =
             wlan_cmd_802_11_bca_timeshare(pmpriv, cmd_ptr, cmd_action,
                                           pdata_buf);
-        break;
-    case HostCmd_CMD_SDIO_GPIO_INT_CONFIG:
-        ret = wlan_cmd_sdio_gpio_int(pmpriv, cmd_ptr, cmd_action, pdata_buf);
         break;
     default:
         PRINTM(MERROR, "PREP_CMD: unknown command- %#x\n", cmd_no);
@@ -1912,14 +1758,6 @@ mlan_sta_init_cmd(IN t_void * priv, IN t_u8 first_sta)
     ENTER();
 
     if (first_sta == MTRUE) {
-        /* 
-         * This should be issued in the very first to config 
-         *   SDIO_GPIO interrupt mode.
-         */
-        if (wlan_set_sdio_gpio_int(pmpriv) != MLAN_STATUS_SUCCESS) {
-            ret = MLAN_STATUS_FAILURE;
-            goto done;
-        }
 
         ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_FUNC_INIT,
                                HostCmd_ACT_GEN_SET, 0, MNULL, MNULL);
@@ -1932,15 +1770,6 @@ mlan_sta_init_cmd(IN t_void * priv, IN t_u8 first_sta)
          */
         ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_GET_HW_SPEC,
                                HostCmd_ACT_GEN_GET, 0, MNULL, MNULL);
-        if (ret) {
-            ret = MLAN_STATUS_FAILURE;
-            goto done;
-        }
-
-        /* set fw wakeup method */
-        ret = wlan_prepare_cmd(pmpriv, HostCmd_CMD_802_11_FW_WAKE_METHOD,
-                               HostCmd_ACT_GEN_GET, 0, MNULL,
-                               &pmpriv->adapter->fw_wakeup_method);
         if (ret) {
             ret = MLAN_STATUS_FAILURE;
             goto done;

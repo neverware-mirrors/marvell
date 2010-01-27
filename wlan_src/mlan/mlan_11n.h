@@ -44,6 +44,9 @@ int wlan_cmd_append_11n_tlv(IN mlan_private * pmpriv,
                             OUT t_u8 ** ppbuffer);
 /** Reconfigure the tx buf size in firmware */
 void wlan_cfg_tx_buf(mlan_private * pmpriv, BSSDescriptor_t * pbss_desc);
+/** wlan fill cap info */
+void wlan_fill_cap_info(mlan_adapter * pmadapter,
+                        MrvlIETypes_HTCap_t * pht_cap);
 /** Miscellaneous configuration handler */
 mlan_status wlan_11n_cfg_ioctl(IN pmlan_adapter pmadapter,
                                IN pmlan_ioctl_req pioctl_req);
@@ -74,13 +77,18 @@ void wlan_11n_update_addba_request(mlan_private * priv);
 int wlan_get_rxreorder_tbl(mlan_private * priv, rx_reorder_tbl * buf);
 /** get tx ba stream table */
 int wlan_get_txbastream_tbl(mlan_private * priv, tx_ba_stream_tbl * buf);
-/** AMSDU Aggr control */
+/** AMSDU Aggr control cmd resp */
 mlan_status wlan_ret_amsdu_aggr_ctrl(pmlan_private pmpriv,
                                      HostCmd_DS_COMMAND * resp,
                                      mlan_ioctl_req * pioctl_buf);
-/** wlan fill cap info */
-void wlan_fill_cap_info(mlan_adapter * pmadapter,
-                        MrvlIETypes_HTCap_t * pht_cap);
+/** reconfigure tx buf size */
+mlan_status wlan_cmd_recfg_tx_buf(mlan_private * priv,
+                                  HostCmd_DS_COMMAND * cmd,
+                                  int cmd_action, void *pdata_buf);
+/** AMSDU aggr control cmd */
+mlan_status wlan_cmd_amsdu_aggr_ctrl(mlan_private * priv,
+                                     HostCmd_DS_COMMAND * cmd,
+                                     int cmd_action, void *pdata_buf);
 
 /**
  *  @brief This function checks whether current BA stream is high priority or not
@@ -131,9 +139,8 @@ wlan_is_cur_bastream_high_prio(mlan_private * priv, int tid)
 static INLINE t_u8
 wlan_is_ampdu_allowed(mlan_private * priv, raListTbl * ptr)
 {
-    return (((priv->aggr_prio_tbl[wlan_get_tid(priv->adapter, ptr)].ampdu_ap
-              != BA_STREAM_NOT_ALLOWED) && IS_11N_ENABLED(priv))
-            ? MTRUE : MFALSE);
+    return ((priv->aggr_prio_tbl[wlan_get_tid(priv->adapter, ptr)].ampdu_ap
+             != BA_STREAM_NOT_ALLOWED) ? MTRUE : MFALSE);
 }
 
 /**
@@ -147,8 +154,8 @@ wlan_is_ampdu_allowed(mlan_private * priv, raListTbl * ptr)
 static INLINE t_u8
 wlan_is_amsdu_allowed(mlan_private * priv, raListTbl * ptr)
 {
-    return (((priv->aggr_prio_tbl[wlan_get_tid(priv->adapter, ptr)].amsdu
-              != BA_STREAM_NOT_ALLOWED) && IS_11N_ENABLED(priv))
+    return ((priv->aggr_prio_tbl[wlan_get_tid(priv->adapter, ptr)].amsdu
+             != BA_STREAM_NOT_ALLOWED)
             ? MTRUE : MFALSE);
 }
 
@@ -162,10 +169,16 @@ wlan_is_amsdu_allowed(mlan_private * priv, raListTbl * ptr)
 static INLINE t_u8
 wlan_is_bastream_avail(mlan_private * priv)
 {
-    return ((wlan_wmm_list_len
-             (priv->adapter,
-              (pmlan_list_head) & priv->tx_ba_stream_tbl_ptr) <
-             MLAN_MAX_BASTREAM_SUPPORTED) ? MTRUE : MFALSE);
+    mlan_private *pmpriv = MNULL;
+    t_u8 i = 0;
+    t_u32 bastream_num = 0;
+    for (i = 0; i < MLAN_MAX_BSS_NUM; i++) {
+        pmpriv = priv->adapter->priv[i];
+        bastream_num +=
+            wlan_wmm_list_len(priv->adapter,
+                              (pmlan_list_head) & pmpriv->tx_ba_stream_tbl_ptr);
+    }
+    return ((bastream_num < MLAN_MAX_BASTREAM_SUPPORTED) ? MTRUE : MFALSE);
 }
 
 /**
@@ -187,7 +200,6 @@ wlan_find_stream_to_delete(mlan_private * priv,
     TxBAStreamTbl *ptx_tbl;
 
     ENTER();
-
     if (!
         (ptx_tbl =
          (TxBAStreamTbl *) util_peek_list(&priv->tx_ba_stream_tbl_ptr,
@@ -196,7 +208,7 @@ wlan_find_stream_to_delete(mlan_private * priv,
                                           priv->adapter->callbacks.
                                           moal_spin_unlock))) {
         LEAVE();
-        return MNULL;
+        return ret;
     }
 
     tid = priv->aggr_prio_tbl[wlan_get_tid(priv->adapter, ptr)].ampdu_user;
@@ -214,49 +226,6 @@ wlan_find_stream_to_delete(mlan_private * priv,
 
     LEAVE();
     return ret;
-}
-
-/**
- *  @brief This function checks whether BA stream is required or not
- *  
- *  @param priv     A pointer to mlan_private
- *  @param ptr      A pointer to RA list table
- *
- *  @return 	    MTRUE or MFALSE
- */
-static INLINE t_u8
-wlan_is_bastream_required(mlan_private * priv, raListTbl * ptr)
-{
-    TxBAStreamTbl *ptx_tbl;
-
-    ENTER();
-
-    if (!wlan_is_ampdu_allowed(priv, ptr)) {
-        LEAVE();
-        return MFALSE;
-    }
-
-    if (!
-        (ptx_tbl =
-         (TxBAStreamTbl *) util_peek_list(&priv->tx_ba_stream_tbl_ptr,
-                                          priv->adapter->callbacks.
-                                          moal_spin_lock,
-                                          priv->adapter->callbacks.
-                                          moal_spin_unlock))) {
-        LEAVE();
-        return MTRUE;
-    }
-
-    if ((ptx_tbl != (TxBAStreamTbl *) & priv->tx_ba_stream_tbl_ptr) ||
-        wlan_is_bastream_avail(priv) ||
-        wlan_is_cur_bastream_high_prio(priv,
-                                       wlan_get_tid(priv->adapter, ptr))) {
-        LEAVE();
-        return MTRUE;
-    }
-
-    LEAVE();
-    return MFALSE;
 }
 
 /**
@@ -283,5 +252,22 @@ wlan_is_bastream_setup(mlan_private * priv, raListTbl * ptr)
 
     LEAVE();
     return MFALSE;
+}
+
+/**
+ *  @brief This function checks whether 11n is supported
+ *  
+ *  @param priv     A pointer to mlan_private
+ *  @param ra       Address of the receiver STA
+ *
+ *  @return 	    MTRUE or MFALSE
+ */
+static int INLINE
+wlan_is_11n_enabled(mlan_private * priv, t_u8 * ra)
+{
+    int ret = MFALSE;
+    ENTER();
+    LEAVE();
+    return ret;
 }
 #endif /* !_MLAN_11N_H_ */

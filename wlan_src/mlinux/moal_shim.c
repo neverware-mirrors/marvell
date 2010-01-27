@@ -684,7 +684,7 @@ moal_recv_packet(IN t_void * pmoal_handle, IN pmlan_buffer pmbuf)
             }
             skb->dev = priv->netdev;
             skb->protocol = eth_type_trans(skb, priv->netdev);
-            skb->ip_summed = CHECKSUM_UNNECESSARY;
+            skb->ip_summed = CHECKSUM_NONE;
             priv->stats.rx_bytes += skb->len;
             priv->stats.rx_packets++;
             if (in_interrupt())
@@ -748,6 +748,15 @@ moal_recv_event(IN t_void * pmoal_handle, IN pmlan_event pmevent)
             netif_carrier_on(priv->netdev);
         if (netif_queue_stopped(priv->netdev))
             netif_wake_queue(priv->netdev);
+        break;
+    case MLAN_EVENT_ID_DRV_SCAN_REPORT:
+        PRINTM(MCMND, "Scan report\n");
+        memset(&wrqu, 0, sizeof(union iwreq_data));
+        wireless_send_event(priv->netdev, SIOCGIWSCAN, &wrqu, NULL);
+        if (priv->scan_pending_on_block == MTRUE) {
+            priv->scan_pending_on_block = MFALSE;
+            MOAL_REL_SEMAPHORE(&priv->async_sem);
+        }
         break;
     case MLAN_EVENT_ID_DRV_OBSS_SCAN_PARAM:
         memset(&wrqu, 0, sizeof(union iwreq_data));
@@ -894,6 +903,7 @@ moal_recv_event(IN t_void * pmoal_handle, IN pmlan_event pmevent)
     case MLAN_EVENT_ID_DRV_PASSTHU:
         woal_broadcast_event(priv, pmevent->event_buf, pmevent->event_len);
         break;
+
     default:
         break;
     }

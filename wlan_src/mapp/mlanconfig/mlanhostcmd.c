@@ -202,6 +202,11 @@ t_u32
 a2hex(t_s8 * s)
 {
     t_u32 val = 0;
+
+    if (!strncasecmp("0x", s, 2)) {
+        s += 2;
+    }
+
     while (*s && isxdigit(*s)) {
         val = (val << 4) + hexc2bin(*s++);
     }
@@ -259,10 +264,15 @@ ishexstring(t_s8 * s)
     int ret = MLAN_STATUS_FAILURE;
     t_s32 tmp;
 
+    if (!strncasecmp("0x", s, 2)) {
+        s += 2;
+    }
     while (*s) {
         tmp = toupper(*s);
-        if (tmp >= 'A' && tmp <= 'F') {
+        if (tmp >= 'A' && tmp <= 'F' || (tmp >= '0' && tmp <= '9')) {
             ret = MLAN_STATUS_SUCCESS;
+        } else {
+            ret = MLAN_STATUS_FAILURE;
             break;
         }
         s++;
@@ -709,12 +719,13 @@ process_host_cmd_resp(t_u8 * buf)
         case HostCmd_CMD_BBP_REG_ACCESS:
         case HostCmd_CMD_RF_REG_ACCESS:
         case HostCmd_CMD_PMIC_REG_ACCESS:
+        case HostCmd_CMD_CAU_REG_ACCESS:
             {
                 HostCmd_DS_REG *preg = (HostCmd_DS_REG *) (buf + S_DS_GEN);
                 preg->action = le16_to_cpu(preg->action);
                 if (preg->action == HostCmd_ACT_GEN_GET) {
                     preg->value = le32_to_cpu(preg->value);
-                    printf("value = 0x%08x\n", preg->value);
+                    printf("value = 0x%08lx\n", preg->value);
                 }
                 break;
             }
@@ -762,7 +773,7 @@ prepare_arp_filter_buffer(t_u8 * buf, t_u16 * length)
 
 /** 
  *  @brief Prepare the hostcmd for register access
- *  @param tyepe    Register type
+ *  @param type     Register type
  *  @param offset   Register offset
  *  @param value    Pointer to value (NULL for read)
  *  @param buf      Pointer to hostcmd buffer
@@ -787,6 +798,9 @@ prepare_hostcmd_regrdwr(t_u32 type, t_u32 offset, t_u32 * value, t_u8 * buf)
         break;
     case 4:
         hostcmd->command = cpu_to_le16(HostCmd_CMD_PMIC_REG_ACCESS);
+        break;
+    case 5:
+        hostcmd->command = cpu_to_le16(HostCmd_CMD_CAU_REG_ACCESS);
         break;
     default:
         printf("Invalid register set specified\n");

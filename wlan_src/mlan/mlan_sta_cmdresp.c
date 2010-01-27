@@ -13,9 +13,7 @@ Change log:
 ******************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -61,15 +59,16 @@ wlan_process_cmdresp_error(mlan_private * pmpriv, HostCmd_DS_COMMAND * resp,
         pioctl_buf->status_code = MLAN_ERROR_FW_CMDRESP;
 
     switch (resp->command) {
-    case HostCmd_CMD_802_11_PS_MODE:
+    case HostCmd_CMD_802_11_PS_MODE_ENH:
         {
-            HostCmd_DS_802_11_PS_MODE *pm = &resp->params.ps_mode;
-            PRINTM(MERROR, "PS_MODE command failed: result=0x%x action=0x%X\n",
+            HostCmd_DS_802_11_PS_MODE_ENH *pm = &resp->params.psmode_enh;
+            PRINTM(MERROR,
+                   "PS_MODE_ENH command failed: result=0x%x action=0x%X\n",
                    resp->result, wlan_le16_to_cpu(pm->action));
             /* 
              * We do not re-try enter-ps command in ad-hoc mode.
              */
-            if (wlan_le16_to_cpu(pm->action) == HostCmd_SubCmd_Enter_PS &&
+            if (wlan_le16_to_cpu(pm->action) == EN_PS &&
                 pmpriv->bss_mode == MLAN_BSS_MODE_IBSS)
                 pmadapter->ps_mode = Wlan802_11PowerModeCAM;
         }
@@ -145,8 +144,16 @@ wlan_ret_get_hw_spec(IN pmlan_private pmpriv,
             pmadapter->config_bands |= BAND_AN;
             pmadapter->fw_bands |= BAND_AN;
         }
-        pmadapter->adhoc_start_band = BAND_A;
+        if (pmadapter->fw_bands & BAND_AN) {
+            pmadapter->adhoc_start_band = BAND_A | BAND_AN;
+            pmadapter->adhoc_11n_enabled = MTRUE;
+        } else
+            pmadapter->adhoc_start_band = BAND_A;
         pmpriv->adhoc_channel = DEFAULT_AD_HOC_CHANNEL_A;
+    } else if (pmadapter->fw_bands & BAND_GN) {
+        pmadapter->adhoc_start_band = BAND_G | BAND_B | BAND_GN;
+        pmpriv->adhoc_channel = DEFAULT_AD_HOC_CHANNEL;
+        pmadapter->adhoc_11n_enabled = MTRUE;
     } else if (pmadapter->fw_bands & BAND_G) {
         pmadapter->adhoc_start_band = BAND_G | BAND_B;
         pmpriv->adhoc_channel = DEFAULT_AD_HOC_CHANNEL;
@@ -204,7 +211,6 @@ wlan_ret_get_hw_spec(IN pmlan_private pmpriv,
     wlan_show_dot11ndevcap(pmadapter, pmadapter->hw_dot_11n_dev_cap);
     wlan_show_devmcssupport(pmadapter, pmadapter->hw_dev_mcs_support);
     pmadapter->mp_end_port = wlan_le16_to_cpu(hw_spec->mp_end_port);
-    pmadapter->mp_data_port_mask = DATA_PORT_MASK;
 
     for (i = 1; i <= (unsigned) (MAX_PORT - pmadapter->mp_end_port); i++) {
         pmadapter->mp_data_port_mask &= ~(1 << (MAX_PORT - i));
@@ -708,7 +714,7 @@ wlan_ret_tx_power_cfg(IN pmlan_private pmpriv,
 }
 
 /** 
- *  @brief This function handles the command response of ps_mode
+ *  @brief This function handles the command response of ps_mode_enh
  * 
  *  @param pmpriv       A pointer to mlan_private structure
  *  @param resp         A pointer to HostCmd_DS_COMMAND
@@ -717,12 +723,12 @@ wlan_ret_tx_power_cfg(IN pmlan_private pmpriv,
  *  @return             MLAN_STATUS_SUCCESS
  */
 static mlan_status
-wlan_ret_802_11_ps_mode(IN pmlan_private pmpriv,
-                        IN HostCmd_DS_COMMAND * resp,
-                        IN mlan_ioctl_req * pioctl_buf)
+wlan_ret_802_11_opt_ps_mode(IN pmlan_private pmpriv,
+                            IN HostCmd_DS_COMMAND * resp,
+                            IN mlan_ioctl_req * pioctl_buf)
 {
     pmlan_adapter pmadapter = pmpriv->adapter;
-    HostCmd_DS_802_11_PS_MODE *pps_mode = &resp->params.ps_mode;
+    HostCmd_DS_802_11_PS_MODE_ENH *pps_mode = &resp->params.psmode_enh;
 
     ENTER();
 
@@ -731,24 +737,35 @@ wlan_ret_802_11_ps_mode(IN pmlan_private pmpriv,
     pps_mode->action = wlan_le16_to_cpu(pps_mode->action);
 
     switch (pps_mode->action) {
-    case HostCmd_SubCmd_Enter_PS:
-        pmadapter->need_to_wakeup = MFALSE;
+    case EN_PS:
         pmadapter->ps_state = PS_STATE_AWAKE;
-        if (pmpriv->media_connected != MTRUE) {
-            /* 
-             * When Deauth Event received before Enter_PS command
-             * response, we need to wake up the firmware.
-             */
-            PRINTM(MINFO, "CMD_RESP: disconnected, exit PS\n");
-            wlan_exit_ps(pmpriv);
+        PRINTM(MDATA, "Settting ps_state to AWAKE\n");
+        if (pmadapter->sleep_period.period) {
+            PRINTM(MDATA, "Setting uapsd/pps mode to TRUE\n");
         }
         break;
-    case HostCmd_SubCmd_Exit_PS:
-        pmadapter->need_to_wakeup = MFALSE;
-        pmadapter->ps_state = PS_STATE_FULL_POWER;
+    case DIS_PS:
+        pmadapter->ps_state = PS_STATE_AWAKE;
+        PRINTM(MDATA, "Setting ps_state to AWAKE\n");
         if (pmadapter->sleep_period.period) {
+            pmadapter->delay_null_pkt = MFALSE;
             pmadapter->tx_lock_flag = MFALSE;
         }
+        break;
+    case EN_AUTO_DS:
+        pmadapter->ps_state = PS_STATE_AWAKE;
+        PRINTM(MDATA, "Enabled auto deep sleep\n");
+        pmpriv->adapter->is_deep_sleep = MTRUE;
+        break;
+    case DIS_AUTO_DS:
+        pmpriv->adapter->is_deep_sleep = MFALSE;
+        pmadapter->ps_state = PS_STATE_AWAKE;
+        PRINTM(MDATA, "Disabled auto deep sleep\n");
+        break;
+    case SLEEP_CONFIRM:
+        PRINTM(MDATA,
+               "Received Sleep confirm response, setting ps_state to SLEEP\n");
+        pmadapter->ps_state = PS_STATE_SLEEP;
         break;
     default:
         PRINTM(MERROR, "CMD_RESP: unknown PS_MODE action 0x%x\n",
@@ -835,40 +852,6 @@ wlan_ret_802_11_sleep_params(IN pmlan_private pmpriv,
 
         pioctl_buf->data_read_written = sizeof(pm_cfg->param.sleep_params)
             + MLAN_SUB_COMMAND_SIZE;
-    }
-
-    LEAVE();
-    return MLAN_STATUS_SUCCESS;
-}
-
-/**
- *  @brief This function handles the command response of fw_wakeup_method
- *
- *  @param pmpriv       A pointer to mlan_private structure
- *  @param resp         A pointer to HostCmd_DS_COMMAND
- *  @param pioctl_buf   A pointer to mlan_ioctl_req structure
- *
- *  @return             MLAN_STATUS_SUCCESS
- */
-static mlan_status
-wlan_ret_fw_wakeup_method(IN pmlan_private pmpriv,
-                          IN HostCmd_DS_COMMAND * resp,
-                          IN mlan_ioctl_req * pioctl_buf)
-{
-    HostCmd_DS_802_11_FW_WAKEUP_METHOD *fwwm = &resp->params.fwwakeupmethod;
-    t_u16 action;
-
-    ENTER();
-
-    action = wlan_le16_to_cpu(fwwm->action);
-
-    switch (action) {
-    case HostCmd_ACT_GEN_GET:
-    case HostCmd_ACT_GEN_SET:
-        pmpriv->adapter->fw_wakeup_method = wlan_le16_to_cpu(fwwm->method);
-        break;
-    default:
-        break;
     }
 
     LEAVE();
@@ -1558,6 +1541,14 @@ wlan_ret_reg_access(t_u16 type,
                 reg_rw->value = (t_u32) reg->value;
                 break;
             }
+        case HostCmd_CMD_CAU_REG_ACCESS:
+            {
+                HostCmd_DS_RF_REG_ACCESS *reg;
+                reg = (HostCmd_DS_RF_REG_ACCESS *) & resp->params.rf_reg;
+                reg_rw->offset = (t_u32) wlan_le16_to_cpu(reg->offset);
+                reg_rw->value = (t_u32) reg->value;
+                break;
+            }
         case HostCmd_CMD_802_11_EEPROM_ACCESS:
             {
                 mlan_ds_read_eeprom *eeprom = &reg_mem->param.rd_eeprom;
@@ -1698,7 +1689,6 @@ wlan_ret_802_11_bca_timeshare(pmlan_private pmpriv,
 /********************************************************
                 Global Functions
 ********************************************************/
-
 /** 
  *  @brief This function handles the station command response
  *  
@@ -1756,29 +1746,17 @@ mlan_process_sta_cmdresp(IN t_void * priv,
     case HostCmd_CMD_TXPWR_CFG:
         ret = wlan_ret_tx_power_cfg(pmpriv, resp, pioctl_buf);
         break;
-    case HostCmd_CMD_802_11_PS_MODE:
-        ret = wlan_ret_802_11_ps_mode(pmpriv, resp, pioctl_buf);
+    case HostCmd_CMD_802_11_PS_MODE_ENH:
+        ret = wlan_ret_802_11_opt_ps_mode(pmpriv, resp, pioctl_buf);
         break;
-    case HostCmd_CMD_802_11_HOST_SLEEP_CFG:
+    case HostCmd_CMD_802_11_HS_CFG_ENH:
         ret = wlan_ret_802_11_hs_cfg(pmpriv, resp, pioctl_buf);
-        break;
-    case HostCmd_CMD_802_11_HOST_SLEEP_ACTIVATE:
-        if (pmadapter->is_hs_configured
-            && pmadapter->hs_cfg.gap == HOST_SLEEP_CFG_GAP_FF)
-            pmadapter->pm_wakeup_card_req = MTRUE;
-        wlan_host_sleep_activated_event(pmpriv, MTRUE);
-        break;
-    case HostCmd_CMD_802_11_WAKEUP_CONFIRM:
-        wlan_host_sleep_activated_event(pmpriv, MFALSE);
         break;
     case HostCmd_CMD_802_11_SLEEP_PERIOD:
         ret = wlan_ret_802_11_sleep_period(pmpriv, resp, pioctl_buf);
         break;
     case HostCmd_CMD_802_11_SLEEP_PARAMS:
         ret = wlan_ret_802_11_sleep_params(pmpriv, resp, pioctl_buf);
-        break;
-    case HostCmd_CMD_802_11_FW_WAKE_METHOD:
-        ret = wlan_ret_fw_wakeup_method(pmpriv, resp, pioctl_buf);
         break;
     case HostCmd_CMD_802_11_ASSOCIATE:
         ret = wlan_ret_802_11_associate(pmpriv, resp, pioctl_buf);
@@ -1906,6 +1884,7 @@ mlan_process_sta_cmdresp(IN t_void * priv,
     case HostCmd_CMD_BBP_REG_ACCESS:
     case HostCmd_CMD_RF_REG_ACCESS:
     case HostCmd_CMD_PMIC_REG_ACCESS:
+    case HostCmd_CMD_CAU_REG_ACCESS:
     case HostCmd_CMD_802_11_EEPROM_ACCESS:
         ret = wlan_ret_reg_access(cmdresp_no, resp, pioctl_buf);
         break;
@@ -1917,8 +1896,6 @@ mlan_process_sta_cmdresp(IN t_void * priv,
         break;
     case HostCmd_CMD_802_11_BCA_CONFIG_TIMESHARE:
         ret = wlan_ret_802_11_bca_timeshare(pmpriv, resp, pioctl_buf);
-        break;
-    case HostCmd_CMD_SDIO_GPIO_INT_CONFIG:
         break;
     default:
         PRINTM(MERROR, "CMD_RESP: Unknown command response %#x\n",

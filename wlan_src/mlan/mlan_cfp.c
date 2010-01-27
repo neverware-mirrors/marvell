@@ -18,10 +18,7 @@ Change Log:
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
-#include "mlan_11d.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 
 /********************************************************
     Local Variables
@@ -881,14 +878,17 @@ wlan_get_supported_rates(mlan_private * pmpriv, WLAN_802_11_RATES rates)
             k = wlan_copy_rates(rates, k, AdhocRates_B, sizeof(AdhocRates_B));
             break;
         case BAND_G:
+        case BAND_G | BAND_GN:
             PRINTM(MINFO, "Adhoc G only\n");
             k = wlan_copy_rates(rates, k, AdhocRates_G, sizeof(AdhocRates_G));
             break;
         case BAND_B | BAND_G:
+        case BAND_B | BAND_G | BAND_GN:
             PRINTM(MINFO, "Adhoc BG\n");
             k = wlan_copy_rates(rates, k, AdhocRates_BG, sizeof(AdhocRates_BG));
             break;
         case BAND_A:
+        case BAND_A | BAND_AN:
             PRINTM(MINFO, "Adhoc A\n");
             k = wlan_copy_rates(rates, k, AdhocRates_A, sizeof(AdhocRates_A));
             break;

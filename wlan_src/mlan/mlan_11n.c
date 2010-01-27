@@ -12,14 +12,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
-#include "mlan_rx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 
@@ -606,8 +602,9 @@ wlan_ret_11n_addba_req(mlan_private * priv, HostCmd_DS_COMMAND * resp)
     } else {
         mlan_11n_delete_bastream_tbl(priv, tid, padd_ba_rsp->peer_mac_addr,
                                      TYPE_DELBA_SENT, MTRUE);
-        if (padd_ba_rsp->add_rsp_result != BA_RESULT_TIMEOUT)
+        if (padd_ba_rsp->add_rsp_result != BA_RESULT_TIMEOUT) {
             priv->aggr_prio_tbl[tid].ampdu_ap = BA_STREAM_NOT_ALLOWED;
+        }
     }
 
     LEAVE();
@@ -635,6 +632,83 @@ wlan_ret_11n_cfg(IN pmlan_private pmpriv,
         cfg = (mlan_ds_11n_cfg *) pioctl_buf->pbuf;
         cfg->param.tx_cfg.httxcap = wlan_le16_to_cpu(htcfg->ht_tx_cap);
         cfg->param.tx_cfg.httxinfo = wlan_le16_to_cpu(htcfg->ht_tx_info);
+    }
+    LEAVE();
+    return MLAN_STATUS_SUCCESS;
+}
+
+/** 
+ *  @brief This function prepares command of reconfigure tx buf
+ *  
+ *  @param priv         A pointer to mlan_private structure
+ *  @param cmd          A pointer to HostCmd_DS_COMMAND structure
+ *  @param cmd_action   The action: GET or SET
+ *  @param pdata_buf    A pointer to data buffer
+ *
+ *  @return             MLAN_STATUS_SUCCESS
+ */
+mlan_status
+wlan_cmd_recfg_tx_buf(mlan_private * priv,
+                      HostCmd_DS_COMMAND * cmd, int cmd_action, void *pdata_buf)
+{
+    HostCmd_DS_TXBUF_CFG *ptx_buf = &cmd->params.tx_buf;
+    t_u16 action = (t_u16) cmd_action;
+    t_u16 buf_size = *((t_u16 *) pdata_buf);
+
+    ENTER();
+    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_RECONFIGURE_TX_BUFF);
+    cmd->size = wlan_cpu_to_le16(sizeof(HostCmd_DS_TXBUF_CFG)
+                                 + S_DS_GEN);
+    ptx_buf->action = wlan_cpu_to_le16(action);
+    switch (action) {
+    case HostCmd_ACT_GEN_SET:
+        PRINTM(MCMND, "set tx_buf=%d\n", buf_size);
+        ptx_buf->buff_size = wlan_cpu_to_le16(buf_size);
+        break;
+    case HostCmd_ACT_GEN_GET:
+    default:
+        ptx_buf->buff_size = 0;
+        break;
+    }
+    LEAVE();
+    return MLAN_STATUS_SUCCESS;
+}
+
+/** 
+ *  @brief This function prepares command of amsdu aggr control
+ *  
+ *  @param priv         A pointer to mlan_private structure
+ *  @param cmd          A pointer to HostCmd_DS_COMMAND structure
+ *  @param cmd_action   The action: GET or SET
+ *  @param pdata_buf    A pointer to data buffer
+ *
+ *  @return             MLAN_STATUS_SUCCESS
+ */
+mlan_status
+wlan_cmd_amsdu_aggr_ctrl(mlan_private * priv,
+                         HostCmd_DS_COMMAND * cmd,
+                         int cmd_action, void *pdata_buf)
+{
+    HostCmd_DS_AMSDU_AGGR_CTRL *pamsdu_ctrl = &cmd->params.amsdu_aggr_ctrl;
+    t_u16 action = (t_u16) cmd_action;
+    mlan_ds_11n_amsdu_aggr_ctrl *aa_ctrl = (mlan_ds_11n_amsdu_aggr_ctrl *)
+        pdata_buf;
+
+    ENTER();
+
+    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_AMSDU_AGGR_CTRL);
+    cmd->size = wlan_cpu_to_le16(sizeof(HostCmd_DS_AMSDU_AGGR_CTRL)
+                                 + S_DS_GEN);
+    pamsdu_ctrl->action = wlan_cpu_to_le16(action);
+    switch (action) {
+    case HostCmd_ACT_GEN_SET:
+        pamsdu_ctrl->enable = wlan_cpu_to_le16(aa_ctrl->enable);
+        pamsdu_ctrl->curr_buf_size = 0;
+        break;
+    case HostCmd_ACT_GEN_GET:
+    default:
+        pamsdu_ctrl->curr_buf_size = 0;
+        break;
     }
     LEAVE();
     return MLAN_STATUS_SUCCESS;
@@ -709,6 +783,7 @@ wlan_cmd_append_11n_tlv(IN mlan_private * pmpriv,
                         IN BSSDescriptor_t * pbss_desc, OUT t_u8 ** ppbuffer)
 {
     MrvlIETypes_HTCap_t *pht_cap;
+    MrvlIETypes_HTInfo_t *pht_info;
     MrvlIEtypes_ChanListParamSet_t *pchan_list;
     MrvlIETypes_2040BSSCo_t *p2040_bss_co;
     MrvlIETypes_ExtCap_t *pext_cap;
@@ -749,6 +824,24 @@ wlan_cmd_append_11n_tlv(IN mlan_private * pmpriv,
     }
 
     if (pbss_desc->pht_info) {
+        pht_info = (MrvlIETypes_HTInfo_t *) * ppbuffer;
+        memset(pht_info, 0, sizeof(MrvlIETypes_HTInfo_t));
+        pht_info->header.type = wlan_cpu_to_le16(HT_OPERATION);
+        pht_info->header.len = sizeof(HTInfo_t);
+
+        memcpy((t_u8 *) pht_info + sizeof(MrvlIEtypesHeader_t),
+               (t_u8 *) pbss_desc->pht_info + sizeof(IEEEtypes_Header_t),
+               pht_info->header.len);
+
+        if (!ISSUPP_CHANWIDTH40(pmpriv->adapter->hw_dot_11n_dev_cap) ||
+            !ISSUPP_CHANWIDTH40(pmpriv->adapter->usr_dot_11n_dev_cap)) {
+            RESET_CHANWIDTH40(pht_info->ht_info.field2);
+        }
+
+        *ppbuffer += sizeof(MrvlIETypes_HTInfo_t);
+        ret_len += sizeof(MrvlIETypes_HTInfo_t);
+        pht_info->header.len = wlan_cpu_to_le16(pht_info->header.len);
+
         pchan_list = (MrvlIEtypes_ChanListParamSet_t *) * ppbuffer;
         memset(pchan_list, 0, sizeof(MrvlIEtypes_ChanListParamSet_t));
         pchan_list->header.type = wlan_cpu_to_le16(TLV_TYPE_CHANLIST);
@@ -1075,7 +1168,7 @@ wlan_11n_get_txbastream_tbl(mlan_private * priv, int tid, t_u8 * ra)
 
     while (ptx_tbl != (TxBAStreamTbl *) & priv->tx_ba_stream_tbl_ptr) {
 
-        PRINTM(MDAT_D, "get_txbastream_tbl TID %d", ptx_tbl->tid);
+        PRINTM(MDAT_D, "get_txbastream_tbl TID %d\n", ptx_tbl->tid);
         DBG_HEXDUMP(MDAT_D, "RA", ptx_tbl->ra, MLAN_MAC_ADDR_LENGTH);
 
         if ((!memcmp(ptx_tbl->ra, ra, MLAN_MAC_ADDR_LENGTH))

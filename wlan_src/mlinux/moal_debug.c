@@ -202,9 +202,8 @@ woal_debug_read(char *page, char **s, off_t off, int cnt, int *eof, void *data)
         else
             p += sprintf(p, "%s=%d\n", d[i].name, val);
     }
-    if (priv->bss_type == MLAN_BSS_TYPE_STA) {
-        if (info.tx_tbl_num)
-            p += sprintf(p, "Tx BA stream table:\n");
+    if (info.tx_tbl_num) {
+        p += sprintf(p, "Tx BA stream table:\n");
         for (i = 0; i < info.tx_tbl_num; i++) {
             p += sprintf(p, "tid = %d, ra = %02x:%02x:%02x:%02x:%02x:%02x\n",
                          (int) info.tx_tbl[i].tid, info.tx_tbl[i].ra[0],
@@ -212,8 +211,9 @@ woal_debug_read(char *page, char **s, off_t off, int cnt, int *eof, void *data)
                          info.tx_tbl[i].ra[3], info.tx_tbl[i].ra[4],
                          info.tx_tbl[i].ra[5]);
         }
-        if (info.rx_tbl_num)
-            p += sprintf(p, "Rx reorder table:\n");
+    }
+    if (info.rx_tbl_num) {
+        p += sprintf(p, "Rx reorder table:\n");
         for (i = 0; i < info.rx_tbl_num; i++) {
             int j;
 

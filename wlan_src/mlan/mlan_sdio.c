@@ -12,15 +12,11 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
 #include "mlan_init.h"
-#include "mlan_tx.h"
-#include "mlan_rx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 #include "mlan_sdio.h"
@@ -613,31 +609,6 @@ wlan_sdio_probe(pmlan_adapter pmadapter)
     mlan_status ret = MLAN_STATUS_SUCCESS;
     t_u32 sdio_ireg = 0;
     pmlan_callbacks pcb = &pmadapter->callbacks;
-    t_u32 chiprev = 0;
-    t_u32 bic = 0;
-
-    /* Get H/W revision number */
-    if (MLAN_STATUS_SUCCESS !=
-        pcb->moal_read_reg(pmadapter->pmoal_handle, CARD_REVISION_REG,
-                           &chiprev)) {
-        PRINTM(MFATAL, "cannot read hardware revision number from card\n");
-    } else {
-        PRINTM(MINFO, "revision=0x%x\n", chiprev);
-        /* 
-         * Enable async interrupt mode
-         * It's only needed for SPI mode, not necessary for 1-bit/4-bit mode.
-         */
-        if (MLAN_STATUS_SUCCESS !=
-            pcb->moal_read_reg(pmadapter->pmoal_handle,
-                               BUS_INTERFACE_CONTROL_REG, &bic))
-            return MLAN_STATUS_FAILURE;
-
-        bic |= ASYNC_INT_MODE;
-        if (MLAN_STATUS_SUCCESS !=
-            pcb->moal_write_reg(pmadapter->pmoal_handle,
-                                BUS_INTERFACE_CONTROL_REG, bic))
-            return MLAN_STATUS_FAILURE;
-    }
 
     /* 
      * Read the HOST_INT_STATUS_REG for ACK the first interrupt got
@@ -764,6 +735,14 @@ wlan_decode_rx_packet(mlan_adapter * pmadapter, mlan_buffer * pmbuf,
         /* take care of curr_cmd = NULL case */
         if (!pmadapter->curr_cmd) {
             cmdBuf = pmadapter->upld_buf;
+            if (pmadapter->ps_state == PS_STATE_SLEEP_CFM) {
+                wlan_process_sleep_confirm_resp(pmadapter,
+                                                pmbuf->pbuf +
+                                                pmbuf->data_offset +
+                                                INTF_HEADER_LEN,
+                                                pmadapter->upld_len -
+                                                INTF_HEADER_LEN);
+            }
             pmadapter->upld_len -= INTF_HEADER_LEN;
             memcpy(cmdBuf, pmbuf->pbuf + pmbuf->data_offset + INTF_HEADER_LEN,
                    MIN(MRVDRV_SIZE_OF_CMD_BUFFER,
@@ -931,17 +910,20 @@ wlan_sdio_card_to_host_mp_aggr(mlan_adapter * pmadapter, mlan_buffer
 
             /* copy pkt to deaggr buf */
             mbuf_deaggr = pmadapter->mpa_rx.mbuf_arr[pind];
-            memcpy(mbuf_deaggr->pbuf, curr_ptr, pkt_len);
-
-            pmadapter->upld_len = pkt_len;
-            /* Process de-aggr packet */
-            wlan_decode_rx_packet(pmadapter, mbuf_deaggr, pkt_type);
-
+            if ((pkt_type == MLAN_TYPE_DATA) &&
+                (pkt_len <= pmadapter->mpa_rx.len_arr[pind])) {
+                memcpy(mbuf_deaggr->pbuf, curr_ptr, pkt_len);
+                pmadapter->upld_len = pkt_len;
+                /* Process de-aggr packet */
+                wlan_decode_rx_packet(pmadapter, mbuf_deaggr, pkt_type);
+            } else {
+                PRINTM(MERROR, "Wrong aggr packet: type=%d, len=%d, max_len=%d",
+                       pkt_type, pkt_len, pmadapter->mpa_rx.len_arr[pind]);
+                pcb->moal_free_mlan_buffer(mbuf_deaggr);
+            }
             curr_ptr += pmadapter->mpa_rx.len_arr[pind];
         }
-
         MP_RX_AGGR_BUF_RESET(pmadapter);
-
     }
 
   rx_curr_single:
@@ -1436,96 +1418,3 @@ wlan_free_sdio_mpa_buffers(IN mlan_adapter * pmadapter)
     return MLAN_STATUS_SUCCESS;
 }
 #endif /* SDIO_MULTI_PORT_TX_AGGR || SDIO_MULTI_PORT_RX_AGGR */
-
-/** GPIO IRQ callback function */
-t_void
-mlan_hs_callback(IN t_void * pctx)
-{
-    t_u32 i;
-    mlan_adapter *pmadapter = (mlan_adapter *) pctx;
-
-    ENTER();
-
-    for (i = 0; i <= MLAN_MAX_BSS_NUM; i++) {
-        if (pmadapter->priv[i])
-            wlan_host_sleep_wakeup_event(pmadapter->priv[i]);
-    }
-
-    LEAVE();
-}
-
-/**
- *  @brief  This function issues commands to initialize firmware
- *
- *  @param priv     	A pointer to mlan_private structure
- *
- *  @return		MLAN_STATUS_SUCCESS or error code
- */
-mlan_status
-wlan_set_sdio_gpio_int(IN pmlan_private priv)
-{
-    mlan_status ret = MLAN_STATUS_SUCCESS;
-    pmlan_adapter pmadapter = priv->adapter;
-    HostCmd_DS_SDIO_GPIO_INT_CONFIG sdio_int_cfg;
-
-    ENTER();
-
-    if (pmadapter->int_mode == INTMODE_GPIO) {
-        PRINTM(MINFO, "SDIO_GPIO_INT_CONFIG: interrupt mode is GPIO\n");
-        sdio_int_cfg.action = HostCmd_ACT_GEN_SET;
-        sdio_int_cfg.gpio_pin = pmadapter->gpio_pin;
-        sdio_int_cfg.gpio_int_edge = INT_FALLING_EDGE;
-        sdio_int_cfg.gpio_pulse_width = DELAY_1_US;
-        ret = wlan_prepare_cmd(priv, HostCmd_CMD_SDIO_GPIO_INT_CONFIG,
-                               HostCmd_ACT_GEN_SET, 0, MNULL, &sdio_int_cfg);
-
-        if (ret) {
-            PRINTM(MERROR, "SDIO_GPIO_INT_CONFIG: send command fail\n");
-            ret = MLAN_STATUS_FAILURE;
-        }
-    } else {
-        PRINTM(MINFO, "SDIO_GPIO_INT_CONFIG: interrupt mode is SDIO\n");
-    }
-
-    LEAVE();
-    return ret;
-}
-
-/**
- *  @brief This function prepares command of SDIO GPIO interrupt
- *  
- *  @param pmpriv	A pointer to mlan_private structure
- *  @param cmd	   	A pointer to HostCmd_DS_COMMAND structure
- *  @param cmd_action   The action: GET or SET
- *  @param pdata_buf    A pointer to data buffer
- *  @return             MLAN_STATUS_SUCCESS or MLAN_STATUS_FAILURE
- */
-mlan_status
-wlan_cmd_sdio_gpio_int(pmlan_private pmpriv,
-                       IN HostCmd_DS_COMMAND * cmd,
-                       IN t_u16 cmd_action, IN t_void * pdata_buf)
-{
-    HostCmd_DS_SDIO_GPIO_INT_CONFIG *psdio_gpio_int =
-        &cmd->params.sdio_gpio_int;
-
-    ENTER();
-
-    cmd->command = wlan_cpu_to_le16(HostCmd_CMD_SDIO_GPIO_INT_CONFIG);
-    cmd->size =
-        wlan_cpu_to_le16((sizeof(HostCmd_DS_SDIO_GPIO_INT_CONFIG)) + S_DS_GEN);
-
-    memset(psdio_gpio_int, 0, sizeof(HostCmd_DS_SDIO_GPIO_INT_CONFIG));
-    if (cmd_action == HostCmd_ACT_GEN_SET) {
-        memcpy(psdio_gpio_int, pdata_buf,
-               sizeof(HostCmd_DS_SDIO_GPIO_INT_CONFIG));
-        psdio_gpio_int->action = wlan_cpu_to_le16(psdio_gpio_int->action);
-        psdio_gpio_int->gpio_pin = wlan_cpu_to_le16(psdio_gpio_int->gpio_pin);
-        psdio_gpio_int->gpio_int_edge =
-            wlan_cpu_to_le16(psdio_gpio_int->gpio_int_edge);
-        psdio_gpio_int->gpio_pulse_width =
-            wlan_cpu_to_le16(psdio_gpio_int->gpio_pulse_width);
-    }
-
-    LEAVE();
-    return MLAN_STATUS_SUCCESS;
-}

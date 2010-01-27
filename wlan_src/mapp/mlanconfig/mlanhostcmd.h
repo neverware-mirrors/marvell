@@ -37,6 +37,8 @@ Change log:
 #define HostCmd_CMD_RF_REG_ACCESS             0x001b
 /** Host Command ID : PMIC register access */
 #define HostCmd_CMD_PMIC_REG_ACCESS           0x00ad
+/** Host Command ID : CAU register access */
+#define HostCmd_CMD_CAU_REG_ACCESS            0x00ed
 
 /** Host Command ID : 802.11 BG scan configuration */
 #define HostCmd_CMD_802_11_BG_SCAN_CONFIG     0x006b
@@ -94,6 +96,22 @@ typedef struct MAPP_HostCmd_DS_GEN
     /** Result */
     t_u16 result;
 } __ATTRIB_PACK__ HostCmd_DS_GEN;
+
+typedef struct _HostCmd_DS_MEF_CFG
+{
+    /** Criteria */
+    t_u32 Criteria;
+    /** Number of entries */
+    t_u16 NumEntries;
+} __ATTRIB_PACK__ HostCmd_DS_MEF_CFG;
+
+typedef struct _MEF_CFG_DATA
+{
+    /** Size */
+    t_u16 size;
+    /** Data */
+    HostCmd_DS_MEF_CFG data;
+} __ATTRIB_PACK__ MEF_CFG_DATA;
 
 /** Size of HostCmd_DS_GEN */
 #define S_DS_GEN    sizeof(HostCmd_DS_GEN)

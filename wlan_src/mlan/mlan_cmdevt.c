@@ -14,13 +14,10 @@ Change Log:
     05/12/2009: initial version
 ************************************************************/
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 #include "mlan_11h.h"
@@ -347,33 +344,6 @@ wlan_dnld_cmd_to_fw(IN mlan_private * pmpriv, IN cmd_ctrl_node * pcmd_node)
 
     pmadapter->cmd_timer_is_set = MTRUE;
 
-    if (cmd_code == HostCmd_CMD_802_11_DEEP_SLEEP) {
-        /* 
-         * 1. change the PS state to DEEP_SLEEP
-         * 2. since there is no response for this command, so 
-         *    delete the command timer and free the Node. 
-         */
-
-        pmadapter->is_deep_sleep = MTRUE;
-
-        wlan_insert_cmd_to_free_q(pmadapter, pcmd_node);
-
-        wlan_request_cmd_lock(pmadapter);
-        pmadapter->curr_cmd = MNULL;
-        wlan_release_cmd_lock(pmadapter);
-
-        if (pmadapter->cmd_timer_is_set) {
-            pcb->moal_stop_timer(pmadapter->pmlan_cmd_timer);
-            /* Cancel command timeout timer */
-            pmadapter->cmd_timer_is_set = MFALSE;
-        }
-
-        if (pmadapter->is_hs_configured) {
-            pmadapter->pm_wakeup_card_req = MTRUE;
-            wlan_host_sleep_activated_event(pmpriv, MTRUE);
-        }
-    }
-
     ret = MLAN_STATUS_SUCCESS;
 
   done:
@@ -394,24 +364,26 @@ wlan_dnld_sleep_confirm_cmd(mlan_adapter * pmadapter)
     mlan_status ret = MLAN_STATUS_SUCCESS;
     static t_u32 i = 0;
     t_u16 cmd_len = 0;
-    sleep_confirm_buffer *sleep_cfm_buf =
-        (sleep_confirm_buffer *) (pmadapter->psleep_cfm->pbuf +
-                                  pmadapter->psleep_cfm->data_offset);
+    HostCmd_DS_802_11_PS_MODE_ENH *pps_mode = MNULL;
+    opt_sleep_confirm_buffer *sleep_cfm_buf =
+        (opt_sleep_confirm_buffer *) (pmadapter->psleep_cfm->pbuf +
+                                      pmadapter->psleep_cfm->data_offset);
 
     ENTER();
 
-    if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
-        MLAN_BSS_TYPE_STA) {
-        cmd_len = sizeof(PS_CMD_ConfirmSleep);
-        sleep_cfm_buf->ps_cfm_sleep.seq_num =
-            wlan_cpu_to_le16(++pmadapter->seq_num);
-        DBG_HEXDUMP(MCMD_D, "SLEEP_CFM", &sleep_cfm_buf->ps_cfm_sleep, cmd_len);
-    }
+    cmd_len = sizeof(HostCmd_DS_COMMAND);
+    pps_mode = &sleep_cfm_buf->ps_cfm_sleep.params.psmode_enh;
+    sleep_cfm_buf->ps_cfm_sleep.seq_num =
+        wlan_cpu_to_le16(++pmadapter->seq_num);
+    pps_mode->params.sleep_cfm.resp_ctrl = wlan_cpu_to_le16(RESP_NEEDED);
+    DBG_HEXDUMP(MCMD_D, "SLEEP_CFM", &sleep_cfm_buf->ps_cfm_sleep, cmd_len);
 
     /* Send sleep confirm command to firmware */
+
     pmadapter->psleep_cfm->data_len = cmd_len + INTF_HEADER_LEN;
     ret = wlan_sdio_host_to_card(pmadapter, MLAN_TYPE_CMD,
                                  pmadapter->psleep_cfm, MNULL);
+
     if (ret == MLAN_STATUS_FAILURE) {
         PRINTM(MERROR, "SLEEP_CFM: failed\n");
         pmadapter->dbg.num_cmd_sleep_cfm_host_to_card_failure++;
@@ -419,11 +391,16 @@ wlan_dnld_sleep_confirm_cmd(mlan_adapter * pmadapter)
     } else {
         if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
             MLAN_BSS_TYPE_STA) {
-            pmadapter->ps_state = PS_STATE_SLEEP;
-            if (!pmadapter->sleep_period.period)
-                pmadapter->pm_wakeup_card_req = MTRUE;
+            if (!pps_mode->params.sleep_cfm.resp_ctrl) {
+                /* Response is not needed for sleep confirm command */
+                pmadapter->ps_state = PS_STATE_SLEEP;
+            } else {
+                pmadapter->ps_state = PS_STATE_SLEEP_CFM;
+            }
 
-            if (pmadapter->is_hs_configured && !pmadapter->sleep_period.period) {
+            if (pps_mode->params.sleep_cfm.resp_ctrl != RESP_NEEDED
+                && (pmadapter->is_hs_configured &&
+                    !pmadapter->sleep_period.period)) {
                 pmadapter->pm_wakeup_card_req = MTRUE;
                 wlan_host_sleep_activated_event(wlan_get_priv
                                                 (pmadapter, MLAN_BSS_TYPE_STA),
@@ -855,18 +832,13 @@ wlan_insert_cmd_to_pending_q(IN mlan_adapter * pmadapter,
 
     command = wlan_le16_to_cpu(pcmd->command);
 
-    /* Exit_PS command needs to be queued in the header always. */
-    if (command == HostCmd_CMD_802_11_PS_MODE) {
-        HostCmd_DS_802_11_PS_MODE *pm = &pcmd->params.ps_mode;
-        if (wlan_le16_to_cpu(pm->action) == HostCmd_SubCmd_Exit_PS) {
-            if (pmadapter->ps_state != PS_STATE_FULL_POWER)
+/* Exit_PS command needs to be queued in the header always. */
+    if (command == HostCmd_CMD_802_11_PS_MODE_ENH) {
+        HostCmd_DS_802_11_PS_MODE_ENH *pm = &pcmd->params.psmode_enh;
+        if (wlan_le16_to_cpu(pm->action) == DIS_PS) {
+            if (pmadapter->ps_state != PS_STATE_AWAKE)
                 add_tail = MFALSE;
         }
-    }
-    if ((command == HostCmd_CMD_802_11_WAKEUP_CONFIRM) ||
-        (command == HostCmd_CMD_802_11_HOST_SLEEP_ACTIVATE) ||
-        (command == HostCmd_CMD_802_11_HOST_SLEEP_CFG)) {
-        add_tail = MFALSE;
     }
 
     if (add_tail) {
@@ -934,93 +906,11 @@ wlan_exec_next_cmd(mlan_adapter * pmadapter)
                                     pcmd_node->cmdbuf->data_offset);
         priv = pcmd_node->priv;
 
-        if (priv->bss_type == MLAN_BSS_TYPE_STA) {
-            if (wlan_is_cmd_allowed_in_ps(pmadapter, pcmd->command)) {
-                if ((pmadapter->ps_state == PS_STATE_SLEEP) ||
-                    (pmadapter->ps_state == PS_STATE_PRE_SLEEP)) {
-                    PRINTM(MERROR,
-                           "EXEC_NEXT_CMD: Cannot send cmd 0x%x in ps_state %d\n",
-                           pcmd->command, pmadapter->ps_state);
-                    ret = MLAN_STATUS_FAILURE;
-                    wlan_release_cmd_lock(pmadapter);
-                    goto done;
-                }
-                PRINTM(MCMND, "EXEC_NEXT_CMD: OK to send command "
-                       "0x%x in ps_state %d\n",
-                       pcmd->command, pmadapter->ps_state);
-            } else if (pmadapter->ps_state != PS_STATE_FULL_POWER) {
-                /* 
-                 * 1. Non-PS command: 
-                 * Queue it. set need_to_wakeup to TRUE if current state 
-                 * is SLEEP, otherwise call wlan_exit_ps to send Exit_PS.
-                 * 2. PS command but not Exit_PS:
-                 * Ignore it.
-                 * 3. PS command Exit_PS:
-                 * Set need_to_wakeup to TRUE if current state is SLEEP, 
-                 * otherwise send this command down to firmware
-                 * immediately.
-                 */
-                if (pcmd->command !=
-                    wlan_cpu_to_le16(HostCmd_CMD_802_11_PS_MODE)) {
-                    wlan_release_cmd_lock(pmadapter);
-                    /* 
-                     * Prepare to send Exit PS,
-                     * this non PS command will be sent later
-                     */
-                    if ((pmadapter->ps_state == PS_STATE_SLEEP) ||
-                        (pmadapter->ps_state == PS_STATE_PRE_SLEEP)) {
-                        /* 
-                         * w/ new scheme, it will not reach here.
-                         * since it is blocked in main_thread.
-                         */
-                        pmadapter->need_to_wakeup = MTRUE;
-                    } else
-                        wlan_exit_ps(priv);
-
-                    ret = MLAN_STATUS_SUCCESS;
-                    goto done;
-
-                } else {
-                    /* 
-                     * PS command. Ignore it if it is not Exit_PS. 
-                     * otherwise send it down immediately.
-                     */
-                    HostCmd_DS_802_11_PS_MODE *pm = &pcmd->params.ps_mode;
-
-                    PRINTM(MCMND, "EXEC_NEXT_CMD: PS cmd- Action=0x%x\n",
-                           pm->action);
-                    if (pm->action != wlan_cpu_to_le16(HostCmd_SubCmd_Exit_PS)) {
-                        PRINTM(MCMND, "EXEC_NEXT_CMD: Ignore Enter PS cmd\n");
-                        util_unlink_list(&pmadapter->cmd_pending_q,
-                                         (pmlan_linked_list) pcmd_node,
-                                         pmadapter->callbacks.moal_spin_lock,
-                                         pmadapter->callbacks.moal_spin_unlock);
-                        wlan_insert_cmd_to_free_q(pmadapter, pcmd_node);
-
-                        ret = MLAN_STATUS_SUCCESS;
-                        wlan_release_cmd_lock(pmadapter);
-                        goto done;
-                    }
-
-                    if ((pmadapter->ps_state == PS_STATE_SLEEP) ||
-                        (pmadapter->ps_state == PS_STATE_PRE_SLEEP)) {
-                        PRINTM(MCMND,
-                               "EXEC_NEXT_CMD: Ignore ExitPS cmd in sleep\n");
-                        util_unlink_list(&pmadapter->cmd_pending_q,
-                                         (pmlan_linked_list) pcmd_node,
-                                         pmadapter->callbacks.moal_spin_lock,
-                                         pmadapter->callbacks.moal_spin_unlock);
-                        wlan_insert_cmd_to_free_q(pmadapter, pcmd_node);
-                        pmadapter->need_to_wakeup = MTRUE;
-
-                        ret = MLAN_STATUS_SUCCESS;
-                        wlan_release_cmd_lock(pmadapter);
-                        goto done;
-                    }
-
-                    PRINTM(MCMND, "EXEC_NEXT_CMD: Sending Exit_PS down...\n");
-                }
-            }
+        if (pmadapter->ps_state != PS_STATE_AWAKE) {
+            PRINTM(MERROR,
+                   "Cannot send command in sleep state, this should not happen\n");
+            wlan_release_cmd_lock(pmadapter);
+            goto done;
         }
 
         util_unlink_list(&pmadapter->cmd_pending_q,
@@ -1029,50 +919,21 @@ wlan_exec_next_cmd(mlan_adapter * pmadapter)
                          pmadapter->callbacks.moal_spin_unlock);
         wlan_release_cmd_lock(pmadapter);
         ret = wlan_dnld_cmd_to_fw(priv, pcmd_node);
+        priv = wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY);
+        /* Any command sent to the firmware when host is in sleep mode, should
+           de-configure host sleep */
+        /* We should skip the host sleep configuration command itself though */
+        if (priv &&
+            (pcmd->command !=
+             wlan_cpu_to_le16(HostCmd_CMD_802_11_HS_CFG_ENH))) {
+            if (pmadapter->hs_activated == MTRUE) {
+                pmadapter->is_hs_configured = MFALSE;
+                wlan_host_sleep_activated_event(priv, MFALSE);
+            }
+        }
         goto done;
     } else {
         wlan_release_cmd_lock(pmadapter);
-        /* Nothing in command pending queue now */
-        if (!(priv = wlan_get_priv(pmadapter, MLAN_BSS_TYPE_STA)))
-            goto done;
-        if (priv->media_connected == MTRUE) {
-            /* 
-             * Check if in power save mode, if yes, put the device back
-             * to PS mode
-             */
-            if ((pmadapter->ps_mode != Wlan802_11PowerModeCAM) &&
-                (pmadapter->ps_state == PS_STATE_FULL_POWER)) {
-                if (priv->sec_info.wpa_enabled || priv->sec_info.wpa2_enabled) {
-                    if (priv->wpa_is_gtk_set) {
-                        PRINTM(MCMND, "EXEC_NEXT_CMD: WPA enabled and GTK_SET"
-                               " go back to PS_SLEEP\n");
-                        wlan_enter_ps(priv);
-                    }
-                } else {
-                    if ((priv->bss_mode != MLAN_BSS_MODE_IBSS) ||
-                        priv->curr_bss_params.bss_descriptor.atim_window) {
-                        PRINTM(MCMND, "EXEC_NEXT_CMD: Command PendQ is empty,"
-                               " go back to PS_SLEEP\n");
-                        wlan_enter_ps(priv);
-                    }
-                }
-            }
-        }
-        /* 
-         * The hs_activate command is sent when Host Sleep is configured
-         * and de-activated in full power mode.
-         */
-        if (pmadapter->is_hs_configured && !pmadapter->hs_activated
-            && (((pmadapter->ps_mode == Wlan802_11PowerModeCAM) &&
-                 (pmadapter->ps_state == PS_STATE_FULL_POWER))
-                || ((priv->bss_mode == MLAN_BSS_MODE_IBSS) &&
-                    !priv->curr_bss_params.bss_descriptor.atim_window)
-            )
-            ) {
-            ret = wlan_prepare_cmd(priv,
-                                   HostCmd_CMD_802_11_HOST_SLEEP_ACTIVATE,
-                                   0, 0, MNULL, MNULL);
-        }
     }
     ret = MLAN_STATUS_SUCCESS;
   done:
@@ -1178,7 +1039,7 @@ wlan_process_cmdresp(mlan_adapter * pmadapter)
     if (pmadapter->curr_cmd->cmd_flag & CMD_F_HOSTCMD) {
         pmadapter->curr_cmd->cmd_flag &= ~CMD_F_HOSTCMD;
         if ((cmdresp_result == HostCmd_RESULT_OK)
-            && (cmdresp_no == HostCmd_CMD_802_11_HOST_SLEEP_CFG))
+            && (cmdresp_no == HostCmd_CMD_802_11_HS_CFG_ENH))
             ret = wlan_ret_802_11_hs_cfg(pmpriv, resp, pioctl_buf);
     } else {
         /* handle response */
@@ -1462,10 +1323,12 @@ wlan_host_sleep_activated_event(pmlan_private priv, t_u8 activated)
     if (activated) {
         if (priv->adapter->is_hs_configured) {
             priv->adapter->hs_activated = MTRUE;
+            PRINTM(MEVENT, "hs_actived\n");
             wlan_recv_event(priv, MLAN_EVENT_ID_DRV_HS_ACTIVATED, MNULL);
         } else
             PRINTM(MWARN, "hs_activated: HS not configured !!!\n");
     } else {
+        PRINTM(MEVENT, "hs_deactived\n");
         priv->adapter->hs_activated = MFALSE;
         wlan_recv_event(priv, MLAN_EVENT_ID_DRV_HS_DEACTIVATED, MNULL);
     }
@@ -1509,22 +1372,104 @@ wlan_ret_802_11_hs_cfg(IN pmlan_private pmpriv,
                        IN mlan_ioctl_req * pioctl_buf)
 {
     pmlan_adapter pmadapter = pmpriv->adapter;
-    HostCmd_DS_802_11_HOST_SLEEP_CFG *phs_cfg = &resp->params.hs_cfg;
+    HostCmd_DS_802_11_HS_CFG_ENH *phs_cfg = &resp->params.opt_hs_cfg;
     ENTER();
 
-    phs_cfg->conditions = wlan_le32_to_cpu(phs_cfg->conditions);
-    PRINTM(MCMND, "CMD_RESP: HS_CFG cmd reply result=%#x,"
-           " conditions=0x%x gpio=0x%x gap=0x%x\n",
-           resp->result, phs_cfg->conditions, phs_cfg->gpio, phs_cfg->gap);
-
-    if (phs_cfg->conditions != HOST_SLEEP_CFG_CANCEL) {
+    if (phs_cfg->action == HS_ACTIVATE) {
+        wlan_host_sleep_activated_event(pmpriv, MTRUE);
+        goto done;
+    } else {
+        phs_cfg->params.hs_config.conditions =
+            wlan_le32_to_cpu(phs_cfg->params.hs_config.conditions);
+        PRINTM(MCMND,
+               "CMD_RESP: HS_CFG cmd reply result=%#x,"
+               " conditions=0x%x gpio=0x%x gap=0x%x\n", resp->result,
+               phs_cfg->params.hs_config.conditions,
+               phs_cfg->params.hs_config.gpio, phs_cfg->params.hs_config.gap);
+    }
+    if (phs_cfg->params.hs_config.conditions != HOST_SLEEP_CFG_CANCEL) {
         pmadapter->is_hs_configured = MTRUE;
     } else {
         pmadapter->is_hs_configured = MFALSE;
-        if (pmadapter->ps_state == PS_STATE_FULL_POWER &&
-            pmadapter->hs_activated)
+        if (pmadapter->hs_activated)
             wlan_host_sleep_activated_event(pmpriv, MFALSE);
     }
+  done:
     LEAVE();
     return MLAN_STATUS_SUCCESS;
+}
+
+/** 
+ *  @brief Perform hs related activities on receving the power up interrupt
+ *  
+ *  @param pmadapter  A pointer to the adapter structure
+ *  @return           N/A
+ */
+t_void
+wlan_process_hs_config(pmlan_adapter pmadapter)
+{
+    PRINTM(MINFO,
+           "Auto Cancelling host sleep since there is some interrupt from the firmware\n");
+    wlan_pm_wakeup_card(pmadapter);
+    pmadapter->hs_activated = MFALSE;
+    pmadapter->is_hs_configured = MFALSE;
+    wlan_host_sleep_activated_event(wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY),
+                                    MFALSE);
+    return;
+}
+
+/** 
+ *  @brief Check sleep confirm command response and set the state to ASLEEP
+ *  
+ *  @param pmadapter  A pointer to the adapter structure
+ *  @param pbuf       A pointer to the command response buffer
+ *  @param upld_len   Command response buffer length
+ *  @return           N/A
+ */
+void
+wlan_process_sleep_confirm_resp(pmlan_adapter pmadapter, t_u8 * pbuf,
+                                t_u32 upld_len)
+{
+    HostCmd_DS_COMMAND *cmd;
+    pmlan_private pmpriv = wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY);
+
+    ENTER();
+
+    if (!upld_len) {
+        PRINTM(MERROR, "Command size is 0\n");
+        LEAVE();
+        return;
+    }
+    cmd = (HostCmd_DS_COMMAND *) pbuf;
+    cmd->result = wlan_le16_to_cpu(cmd->result);
+    cmd->command = wlan_le16_to_cpu(cmd->command);
+
+    /* Get BSS number and corresponding priv */
+    pmpriv = pmadapter->priv[HostCmd_GET_BSS_NO(cmd->command)];
+    if (!pmpriv)
+        pmpriv = wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY);
+    /* Clear RET_BIT & BSS_NO_BITS from HostCmd */
+    cmd->command &= HostCmd_CMD_ID_MASK;
+
+    if (cmd->command != HostCmd_CMD_802_11_PS_MODE_ENH) {
+        PRINTM(MERROR,
+               "Received unexpected response for command %x, result = %x\n",
+               cmd->command, cmd->result);
+        return;
+    }
+    PRINTM(MEVENT, "#\n");
+    if ((pmpriv->media_connected != MTRUE) || !pmadapter->sleep_period.period)
+        pmadapter->pm_wakeup_card_req = MTRUE;
+
+    if (cmd->result != MLAN_STATUS_SUCCESS) {
+        PRINTM(MERROR, "Sleep confirm command failed\n");
+        LEAVE();
+        return;
+    }
+    if (pmadapter->is_hs_configured && !pmadapter->sleep_period.period) {
+        wlan_host_sleep_activated_event(wlan_get_priv
+                                        (pmadapter, MLAN_BSS_TYPE_ANY), MTRUE);
+    }
+    pmadapter->ps_state = PS_STATE_SLEEP;
+    LEAVE();
 }

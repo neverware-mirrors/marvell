@@ -25,5 +25,4 @@ EXPORT_SYMBOL(mlan_send_packet);
 EXPORT_SYMBOL(mlan_ioctl);
 EXPORT_SYMBOL(mlan_main_process);
 EXPORT_SYMBOL(mlan_interrupt);
-EXPORT_SYMBOL(mlan_hs_callback);
 #endif /* LINUX */

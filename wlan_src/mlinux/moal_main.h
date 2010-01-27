@@ -361,9 +361,6 @@ woal_sched_timeout(t_u32 millisec)
 /** Release semaphore */
 #define MOAL_REL_SEMAPHORE(x) 		up(x)
 
-/** Max loop count (* 100ms) for waiting device ready at init time */
-#define MAX_WAIT_DEVICE_READY_COUNT	50
-
 /** Default watchdog timeout */
 #define MRVDRV_DEFAULT_WATCHDOG_TIMEOUT (5 * HZ)
 
@@ -476,7 +473,10 @@ struct _moal_private
 #endif                          /* REASSOCIATION */
         /** Rate index */
     t_u16 rate_index;
-
+        /** Async scan semaphore */
+    struct semaphore async_sem;
+        /** Scan pending on blocked flag */
+    t_u8 scan_pending_on_block;
 };
 
 /** Handle data structure for MOAL */
@@ -532,8 +532,6 @@ struct _moal_handle
         /** Flag of re-association on/off */
     BOOLEAN reassoc_on;
 #endif                          /* REASSOCIATION */
-        /** SDIO interrupt flag */
-    atomic_t int_flag;
         /** Driver workqueue */
     struct workqueue_struct *workqueue;
         /** main work */
@@ -748,7 +746,7 @@ mlan_status woal_hs_cfg_cancel(moal_private * priv, t_u8 wait_option);
 
 /** set deep sleep */
 int woal_set_deep_sleep(moal_private * priv, t_u8 wait_option,
-                        BOOLEAN bdeep_sleep);
+                        BOOLEAN bdeep_sleep, t_u16 idletime);
 void woal_send_iwevcustom_event(moal_private * priv, t_s8 * str);
 void woal_send_mic_error_event(moal_private * priv, t_u32 event);
 void woal_process_ioctl_resp(moal_private * priv, mlan_ioctl_req * req);
@@ -813,6 +811,7 @@ mlan_status woal_set_wapi_enable(moal_private * priv, t_u8 wait_option,
 
 /** Initialize priv */
 void woal_init_priv(moal_private * priv);
+mlan_status woal_get_bss_type(struct net_device *dev, struct ifreq *req);
 
 #ifdef CONFIG_PROC_FS
 /** Initialize proc fs */

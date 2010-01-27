@@ -304,6 +304,29 @@ do {                                    \
  */
 #define SCAN_BEACON_ENTRY_PAD          6
 
+/** Scan time specified in the channel TLV for each channel for passive scans */
+#define MRVDRV_PASSIVE_SCAN_CHAN_TIME       200
+
+/** Scan time specified in the channel TLV for each channel for active scans */
+#define MRVDRV_ACTIVE_SCAN_CHAN_TIME        200
+
+/** Scan time specified in the channel TLV for each channel for specific scans */
+#define MRVDRV_SPECIFIC_SCAN_CHAN_TIME      110
+
+/**
+ * Max total scan time in milliseconds
+ * The total scan time should be less than scan command timeout value (10s)
+ */
+#define MRVDRV_MAX_TOTAL_SCAN_TIME     (MRVDRV_TIMER_10S - MRVDRV_TIMER_1S)
+
+/** Offset for GTK as it has version to skip past for GTK */
+#define RSN_GTK_OUI_OFFSET 2
+
+/** If OUI is not found */
+#define MLAN_OUI_NOT_PRESENT 0
+/** If OUI is found */
+#define MLAN_OUI_PRESENT 1
+
 /** RF antenna select 1 */
 #define RF_ANTENNA_1		0x1
 /** RF antenna auto select */
@@ -331,12 +354,12 @@ do {                                    \
 
 #ifdef SDIO_MULTI_PORT_TX_AGGR
 /** Multi port TX aggregation buffer size */
-#define SDIO_MP_TX_AGGR_DEF_BUF_SIZE        (8192)      /* 8K */
+#define SDIO_MP_TX_AGGR_DEF_BUF_SIZE        (4096)      /* 4K */
 #endif /* SDIO_MULTI_PORT_TX_AGGR */
 
 #ifdef SDIO_MULTI_PORT_RX_AGGR
 /** Multi port RX aggregation buffer size */
-#define SDIO_MP_RX_AGGR_DEF_BUF_SIZE        (16384)     /* 16K */
+#define SDIO_MP_RX_AGGR_DEF_BUF_SIZE        (4096)      /* 4K */
 #endif /* SDIO_MULTI_PORT_RX_AGGR */
 
 /** Debug command number */
@@ -418,9 +441,9 @@ typedef struct _mlan_tx_param
 /** PS_STATE */
 typedef enum _PS_STATE
 {
-    PS_STATE_FULL_POWER,
     PS_STATE_AWAKE,
     PS_STATE_PRE_SLEEP,
+    PS_STATE_SLEEP_CFM,
     PS_STATE_SLEEP
 } PS_STATE;
 
@@ -468,6 +491,8 @@ struct _raListTbl
 
     /** total size of packets in RA list */
     t_u32 total_pkts_size;
+        /** is 11n enabled */
+    t_u32 is_11n_enabled;
 };
 
 /** TID table */
@@ -618,6 +643,33 @@ typedef struct _region_chan_t
     /** chan-freq-txpower mapping table */
     chan_freq_power_t *pcfp;
 } region_chan_t;
+
+/** State of 11d */
+typedef enum
+{
+    DISABLE_11D = 0,
+    ENABLE_11D = 1,
+} state_11d_t;
+
+/** Domain regulatory information */
+typedef struct _wlan_802_11d_domain_reg
+{
+    /** Country Code */
+    t_u8 country_code[COUNTRY_CODE_LEN];
+    /** No. of subband */
+    t_u8 no_of_sub_band;
+    /** Subband data */
+    IEEEtypes_SubbandSet_t sub_band[MRVDRV_MAX_SUBBAND_802_11D];
+} wlan_802_11d_domain_reg_t;
+
+/** Data for state machine */
+typedef struct _wlan_802_11d_state
+{
+    /** True for enabling 11D */
+    state_11d_t enable_11d;
+    /** True for user enabling 11D */
+    state_11d_t user_enable_11d;
+} wlan_802_11d_state_t;
 
 /** Vendor specific configuration IE */
 typedef struct _vendor_spec_cfg_ie
@@ -828,6 +880,9 @@ typedef struct _mlan_private
     t_u8 mrvl_assoc_tlv_buf[MRVDRV_ASSOC_TLV_BUF_SIZE];
     /** Length of the data stored in mrvl_assoc_tlv_buf */
     t_u8 mrvl_assoc_tlv_buf_len;
+    t_u8 *pcurr_bcn_buf;
+    t_u32 curr_bcn_size;
+    t_void *curr_bcn_buf_lock;
 
     /** WPS */
     wps_t wps;
@@ -948,15 +1003,6 @@ struct _cmd_ctrl_node
     /** pre_allocated mlan_buffer for cmd */
     mlan_buffer *pmbuf;
 };
-
-/** Sleep_Confirm command buffer */
-typedef struct _sleep_confirm_buffer
-{
-    /** Header for interface */
-    t_u8 hdr[4];
-    /** Power save sleep confirm command */
-    PS_CMD_ConfirmSleep ps_cfm_sleep;
-} sleep_confirm_buffer;
 
 /** 802.11h State information kept in the 'mlan_adapter' of the driver */
 typedef struct
@@ -1128,11 +1174,6 @@ typedef struct _mlan_adapter
     sdio_mpa_rx mpa_rx;
 #endif                          /* SDIO_MULTI_PORT_RX_AGGR */
 
-    /** SDIO interrupt mode */
-    t_u32 int_mode;
-    /** GPIO interrupt pin */
-    t_u32 gpio_pin;
-
     /** Event cause */
     t_u32 event_cause;
     /** Event buffer */
@@ -1276,11 +1317,18 @@ typedef struct _mlan_adapter
     /** Beacon miss timeout */
     t_u16 bcn_miss_time_out;
 
-    /** Firmware wakeup method */
-    t_u16 fw_wakeup_method;
+    /** AdHoc awake period */
+    t_u16 adhoc_awake_period;
+
     /** Deep Sleep flag */
     t_u8 is_deep_sleep;
 
+        /** delay null pkt flag */
+    t_u8 delay_null_pkt;
+    /** Delay to PS in milliseconds */
+    t_u16 delay_to_ps;
+    /** Enhanced PS mode */
+    t_u16 enhanced_ps_mode;
     /** Device wakeup required flag */
     t_u8 pm_wakeup_card_req;
 
@@ -1290,7 +1338,7 @@ typedef struct _mlan_adapter
     /** Host Sleep configured flag */
     t_u8 is_hs_configured;
     /** Host Sleep configuration */
-    HostCmd_DS_802_11_HOST_SLEEP_CFG hs_cfg;
+    HostCmd_DS_802_11_HS_CFG_ENH hs_cfg;
     /** Host Sleep activated flag */
     t_u8 hs_activated;
     /** Event body */
@@ -1303,6 +1351,8 @@ typedef struct _mlan_adapter
     t_u32 usr_dot_11n_dev_cap;
     /** MIMO abstraction of MCSs supported by device */
     t_u8 usr_dev_mcs_support;
+    /** Enable 11n support for adhoc start */
+    t_u8 adhoc_11n_enabled;
     /** Adhoc Secondary Channel Offset */
     t_u8 chan_offset;
 
@@ -1360,9 +1410,6 @@ mlan_status wlan_prepare_cmd(IN pmlan_private priv,
 
 /** cmd timeout handler */
 t_void wlan_cmd_timeout_func(t_void * FunctionContext);
-/** Check if the ioctl is allowed */
-t_u8 wlan_is_ioctl_allowed(IN pmlan_adapter pmadapter,
-                           IN pmlan_ioctl_req pioctl_req);
 /** process host cmd */
 mlan_status wlan_misc_ioctl_host_cmd(IN pmlan_adapter pmadapter,
                                      IN pmlan_ioctl_req pioctl_req);
@@ -1402,13 +1449,13 @@ t_void wlan_insert_cmd_to_pending_q(IN mlan_adapter * pmadapter,
 mlan_status wlan_exec_next_cmd(mlan_adapter * pmadapter);
 /** Proecess command response */
 mlan_status wlan_process_cmdresp(mlan_adapter * pmadapter);
-/** Process received packet */
-mlan_status wlan_process_rx_packet(pmlan_adapter pmadapter, pmlan_buffer pmbuf);
 /** Handle received packet, has extra handling for aggregate packets */
 mlan_status wlan_handle_rx_packet(pmlan_adapter pmadapter, pmlan_buffer pmbuf);
 /** Process transmission */
 mlan_status wlan_process_tx(pmlan_private priv, pmlan_buffer pmbuf,
                             mlan_tx_param * tx_param);
+/** Transmit a null data packet */
+mlan_status wlan_send_null_packet(pmlan_private priv, t_u8 flags);
 
 #if defined(SDIO_MULTI_PORT_TX_AGGR) || defined(SDIO_MULTI_PORT_RX_AGGR)
 mlan_status wlan_alloc_sdio_mpa_buffers(IN mlan_adapter * pmadapter,
@@ -1438,6 +1485,13 @@ t_void wlan_free_mlan_buffer(pmlan_callbacks pcb, pmlan_buffer pmbuf);
 /** Check Power Save condition */
 t_void wlan_check_ps_cond(mlan_adapter * pmadapter);
 
+/** Process sleep confirm command response */
+void wlan_process_sleep_confirm_resp(pmlan_adapter pmadapter, t_u8 * pbuf,
+                                     t_u32 len);
+
+/** Perform hs related activities on receving the power up interrupt */
+void wlan_process_hs_config(pmlan_adapter pmadapter);
+
 mlan_status wlan_pm_reset_card(pmlan_adapter adapter);
 mlan_status wlan_pm_wakeup_card(pmlan_adapter pmadapter);
 
@@ -1449,6 +1503,8 @@ mlan_status wlan_ret_802_11_hs_cfg(IN pmlan_private pmpriv,
 /** Sends HS_WAKEUP event to applications */
 t_void wlan_host_sleep_wakeup_event(pmlan_private priv);
 
+/** Process received packet */
+mlan_status wlan_process_rx_packet(pmlan_adapter pmadapter, pmlan_buffer pmbuf);
 /** ioctl handler for station mode */
 mlan_status mlan_sta_ioctl(t_void * adapter, pmlan_ioctl_req pioctl_req);
 
@@ -1659,12 +1715,13 @@ t_u8 wlan_is_rate_auto(mlan_private * pmpriv);
 int wlan_get_rate_index(pmlan_adapter pmadapter, t_u16 * rateBitmap, int size);
 /** Region code index table */
 extern t_u16 region_code_index[MRVDRV_MAX_REGION_CODE];
-/** Enter ps function */
-t_void wlan_enter_ps(pmlan_private priv);
-/** Exit ps function */
-t_void wlan_exit_ps(pmlan_private priv);
-/** Checks if a command is allowed in ps mode */
-t_u8 wlan_is_cmd_allowed_in_ps(pmlan_adapter pmadapter, t_u16 command);
+
+/*  Save a beacon buffer of the current bss descriptor */
+t_void wlan_save_curr_bcn(IN mlan_private * pmpriv);
+/*  Restore a beacon buffer of the current bss descriptor */
+t_void wlan_restore_curr_bcn(IN mlan_private * pmpriv);
+/*  Free a beacon buffer of the current bss descriptor */
+t_void wlan_free_curr_bcn(IN mlan_private * pmpriv);
 
 /** 
  *  @brief RA based queueing

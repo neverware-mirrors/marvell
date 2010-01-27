@@ -888,7 +888,7 @@ process_setuserscan(int argc, char *argv[])
                 /* 
                  *  "wc" token string handler
                  */
-                pscratch = rindex(argv[arg_idx], ',');
+                pscratch = strrchr(argv[arg_idx], ',');
 
                 if (pscratch) {
                     *pscratch = 0;

@@ -48,11 +48,6 @@ char *fw_name = NULL;
 int mfg_mode = 0;
 #endif
 
-/** SDIO interrupt mode */
-extern int intmode;
-/** GPIO interrupt pin */
-extern int gpiopin;
-
 /** woal_callbacks */
 static mlan_callbacks woal_callbacks = {
     .moal_init_fw_complete = moal_init_fw_complete,
@@ -189,9 +184,6 @@ woal_init_sw(moal_handle * handle)
     memset(&device, 0, sizeof(mlan_device));
     device.pmoal_handle = handle;
 
-    device.int_mode = (t_u32) intmode;
-    device.gpio_pin = (t_u32) gpiopin;
-
 #ifdef MFG_CMD_SUPPORT
     device.mfg_mode = (t_u32) mfg_mode;
 #endif
@@ -204,10 +196,12 @@ woal_init_sw(moal_handle * handle)
             handle->drv_mode->bss_attr[i].bss_priority;
     }
     memcpy(&device.callbacks, &woal_callbacks, sizeof(mlan_callbacks));
+    sdio_claim_host(((struct sdio_mmc_card *) handle->card)->func);
     if (MLAN_STATUS_SUCCESS == mlan_register(&device, &pmlan))
         handle->pmlan_adapter = pmlan;
     else
         ret = MLAN_STATUS_FAILURE;
+    sdio_release_host(((struct sdio_mmc_card *) handle->card)->func);
 
     LEAVE();
     return ret;
@@ -276,19 +270,21 @@ woal_init_fw(moal_handle * handle)
     }
     fw.pfw_buf = (t_u8 *) handle->firmware->data;
     fw.fw_len = handle->firmware->size;
+    sdio_claim_host(((struct sdio_mmc_card *) handle->card)->func);
     ret = mlan_dnld_fw(handle->pmlan_adapter, &fw);
+    sdio_release_host(((struct sdio_mmc_card *) handle->card)->func);
     if (ret == MLAN_STATUS_FAILURE)
         goto done;
     PRINTM(MMSG, "WLAN FW is active\n");
 
     handle->hardware_status = HardwareStatusFwReady;
-    /* enable host interrupt from SDIO after fw dnld is successful */
-    ret = woal_sdio_enable_host_int(handle);
     if (ret != MLAN_STATUS_SUCCESS)
         goto done;
 
     handle->init_wait_q_woken = MFALSE;
+    sdio_claim_host(((struct sdio_mmc_card *) handle->card)->func);
     ret = mlan_init_fw(handle->pmlan_adapter);
+    sdio_release_host(((struct sdio_mmc_card *) handle->card)->func);
     if (ret == MLAN_STATUS_FAILURE) {
         goto done;
     } else if (ret == MLAN_STATUS_SUCCESS) {
@@ -308,8 +304,6 @@ woal_init_fw(moal_handle * handle)
         release_firmware(handle->firmware);
     if (ret != MLAN_STATUS_SUCCESS) {
         ret = MLAN_STATUS_FAILURE;
-        /* Disable interrupts from the card */
-        woal_sdio_disable_host_int(handle);
     }
     LEAVE();
     return ret;
@@ -395,22 +389,6 @@ woal_open(struct net_device *dev)
 
     ENTER();
 
-    /* On some systems the device open handler will be called before HW ready.
-       Use the following flag check and wait function to work around the issue. */
-    {
-        int i = 0;
-
-        while ((priv->phandle->hardware_status != HardwareStatusReady) &&
-               (i < MAX_WAIT_DEVICE_READY_COUNT)) {
-            i++;
-            woal_sched_timeout(100);
-        }
-        if (i >= MAX_WAIT_DEVICE_READY_COUNT) {
-            PRINTM(MFATAL, "HW not ready, wlan_open() return failure\n");
-            LEAVE();
-            return -EFAULT;
-        }
-    }
     if (!MODULE_GET) {
         LEAVE();
         return -EFAULT;
@@ -723,6 +701,8 @@ woal_add_interface(moal_handle * handle, t_u8 bss_num, t_u8 bss_type)
     priv->netdev = dev;
     priv->bss_num = bss_num;
     priv->bss_type = bss_type;
+    MOAL_INIT_SEMAPHORE(&priv->async_sem);
+    priv->scan_pending_on_block = MFALSE;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
     SET_MODULE_OWNER(dev);
@@ -1267,16 +1247,10 @@ woal_main_work_queue(struct work_struct * work)
         LEAVE();
         return;
     }
-    if (atomic_read(&handle->int_flag)) {
-        atomic_set(&handle->int_flag, 0);
-        /* call mlan_interrupt to read int status */
-        mlan_interrupt(handle->pmlan_adapter);
-        /* unmask all interrupts */
-        sd_unmask((sd_device *) handle->card,
-                  ((sd_device *) handle->card)->pCurrent_Ids);
-    }
+    sdio_claim_host(((struct sdio_mmc_card *) handle->card)->func);
     /* Call MLAN main process */
     mlan_main_process(handle->pmlan_adapter);
+    sdio_release_host(((struct sdio_mmc_card *) handle->card)->func);
 
     LEAVE();
 }
@@ -1311,7 +1285,8 @@ woal_interrupt(moal_handle * handle)
         LEAVE();
         return;
     }
-    atomic_inc(&handle->int_flag);
+    /* call mlan_interrupt to read int status */
+    mlan_interrupt(handle->pmlan_adapter);
     queue_work(handle->workqueue, &handle->main_work);
     LEAVE();
 }
@@ -1346,6 +1321,7 @@ woal_add_card(void *card)
     memset(handle, 0, sizeof(moal_handle));
     handle->card = card;
     m_handle = handle;
+    ((struct sdio_mmc_card *) card)->handle = handle;
 
     /* Init SW */
     if (MLAN_STATUS_SUCCESS != woal_init_sw(handle)) {
@@ -1379,7 +1355,6 @@ woal_add_card(void *card)
         goto err_kmalloc;
 
     MLAN_INIT_WORK(&handle->main_work, woal_main_work_queue);
-    atomic_set(&handle->int_flag, 0);
 
 #ifdef REASSOCIATION
     PRINTM(MINFO, "Starting re-association thread...\n");
@@ -1457,6 +1432,7 @@ woal_add_card(void *card)
     }
     woal_free_moal_handle(handle);
     m_handle = NULL;
+    ((struct sdio_mmc_card *) card)->handle = NULL;
   err_handle:
     up(&AddRemoveCardSem);
   exit_sem_err:
@@ -1614,8 +1590,6 @@ woal_cleanup_module(void)
 #endif
         woal_shutdown_fw(woal_get_priv(handle, MLAN_BSS_TYPE_ANY),
                          MOAL_CMD_WAIT);
-    /* Disable interrupts from the card */
-    woal_sdio_disable_host_int(handle);
 
   exit:
     up(&AddRemoveCardSem);
@@ -1630,12 +1604,17 @@ module_exit(woal_cleanup_module);
 
 module_param(fw_name, charp, 0);
 MODULE_PARM_DESC(fw_name, "Firmware name");
-MODULE_DESCRIPTION("M-WLAN Driver");
-MODULE_AUTHOR("Marvell International Ltd.");
-MODULE_VERSION(MLAN_RELEASE_VERSION);
-MODULE_LICENSE("GPL");
 #ifdef MFG_CMD_SUPPORT
 module_param(mfg_mode, int, 0);
 MODULE_PARM_DESC(mfg_mode,
                  "0: Download normal firmware; 1: Download MFG firmware");
 #endif /* MFG_CMD_SUPPORT */
+#ifdef DEBUG_LEVEL1
+module_param(drvdbg, ulong, 0);
+MODULE_PARM_DESC(drvdbg, "Driver debug");
+#endif /* DEBUG_LEVEL1 */
+
+MODULE_DESCRIPTION("M-WLAN Driver");
+MODULE_AUTHOR("Marvell International Ltd.");
+MODULE_VERSION(MLAN_RELEASE_VERSION);
+MODULE_LICENSE("GPL");

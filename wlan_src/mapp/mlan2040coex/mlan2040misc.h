@@ -292,7 +292,7 @@ typedef struct _wlan_get_scan_table_fixed
     t_u8 rssi;
     /** TSF value from the firmware at packet reception */
     t_u64 network_tsf;
-} __attribute__ ((packed)) wlan_get_scan_table_fixed;
+} wlan_get_scan_table_fixed;
 
 /**
  *  Structure passed in the wlan_ioctl_get_scan_table_info for each
@@ -331,7 +331,7 @@ typedef struct _wlan_ioctl_get_scan_table_entry
      *   - IEEE Infomation Elements; variable number & length per 802.11 spec
      */
     t_u8 bss_info_buffer[1];
-} __attribute__ ((packed)) wlan_ioctl_get_scan_table_entry;
+} wlan_ioctl_get_scan_table_entry;
 
 /**
  *  Sructure to retrieve the scan table
@@ -348,7 +348,7 @@ typedef struct
      *   Each struct is padded to the nearest 32 bit boundary.
      */
     t_u8 scan_table_entry_buf[1];
-} __attribute__ ((packed)) wlan_ioctl_get_scan_table_info;
+} wlan_ioctl_get_scan_table_info;
 
 /* Define general hostcmd data structure */
 /** HostCmd_DS_GEN */

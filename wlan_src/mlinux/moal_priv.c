@@ -42,19 +42,18 @@ static t_u8 SupportedInfraBand[] = {
 /** Bands supported in Ad-Hoc mode */
 static t_u8 SupportedAdhocBand[] = {
     BAND_B, BAND_B | BAND_G, BAND_G,
+    BAND_GN, BAND_B | BAND_G | BAND_GN, BAND_G | BAND_GN,
     BAND_A,
+    BAND_AN, BAND_A | BAND_AN,
 };
 
 /********************************************************
 		Global Variables
 ********************************************************/
-#ifdef DEBUG_LEVEL1
-extern t_u32 drvdbg;
-extern t_u32 ifdbg;
-#endif
 
 /** Macro for maximum size of scan response buffer */
 #define MAX_SCAN_RSP_BUF (16 * 1024)
+
 /********************************************************
 		Local Functions
 ********************************************************/
@@ -251,11 +250,13 @@ woal_get_driver_verext(moal_private * priv, struct ifreq *ireq)
  *  @param priv         Pointer to the moal_private driver data struct
  *  @param wait_option  wait option
  *  @param bdeep_sleep  TRUE--enalbe deepsleep, FALSE--disable deepsleep
+ *  @param idletime     Idle time for optimized PS API
  *
  *  @return             0 --success, otherwise fail
  */
 int
-woal_set_deep_sleep(moal_private * priv, t_u8 wait_option, BOOLEAN bdeep_sleep)
+woal_set_deep_sleep(moal_private * priv, t_u8 wait_option, BOOLEAN bdeep_sleep,
+                    t_u16 idletime)
 {
     int ret = 0;
     mlan_ioctl_req *req = NULL;
@@ -275,16 +276,18 @@ woal_set_deep_sleep(moal_private * priv, t_u8 wait_option, BOOLEAN bdeep_sleep)
     req->action = MLAN_ACT_SET;
     if (bdeep_sleep == MTRUE) {
         PRINTM(MCMND, "Deep Sleep: sleep\n");
-        pm->param.deep_sleep = DEEP_SLEEP_ON;
+        pm->param.auto_deep_sleep.auto_ds = DEEP_SLEEP_ON;
+        if (idletime) {
+            pm->param.auto_deep_sleep.idletime = idletime;
+        }
         if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, req, wait_option)) {
             ret = -EFAULT;
             goto done;
         }
-        netif_stop_queue(priv->netdev);
-        netif_carrier_off(priv->netdev);
     } else {
         PRINTM(MCMND, "%lu : Deep Sleep: wakeup\n", jiffies);
-        pm->param.deep_sleep = DEEP_SLEEP_OFF;
+        pm->param.auto_deep_sleep.auto_ds = DEEP_SLEEP_OFF;
+
         if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, req, wait_option)) {
             ret = -EFAULT;
             goto done;
@@ -325,7 +328,7 @@ woal_warm_reset(moal_private * priv)
     }
 
     /* Exit deep sleep */
-    woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MFALSE);
+    woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MFALSE, 0);
 
     memset(&bss_info, 0, sizeof(bss_info));
     woal_get_bss_info(priv, MOAL_PROC_WAIT, &bss_info);
@@ -602,7 +605,7 @@ woal_get_deep_sleep(moal_private * priv, t_u32 * deep_sleep)
         ret = -EFAULT;
         goto done;
     }
-    *deep_sleep = pm->param.deep_sleep;
+    *deep_sleep = pm->param.auto_deep_sleep.auto_ds;
 
   done:
     if (req)
@@ -624,32 +627,33 @@ static int
 woal_deep_sleep_ioctl(moal_private * priv, struct iwreq *wrq)
 {
     t_u32 deep_sleep = DEEP_SLEEP_OFF;
+    static t_u16 idletime = DEEP_SLEEP_ILDE_TIME;
+    t_u32 data[2];
 
     ENTER();
 
-    if (priv->media_connected == MTRUE) {
-        PRINTM(MMSG, "Cannot enter Deep Sleep mode in connected state\n");
-        LEAVE();
-        return -EINVAL;
-    }
-
-    if (wrq->u.data.length == 1) {
-        if (copy_from_user(&deep_sleep, wrq->u.data.pointer, sizeof(int))) {
+    if (wrq->u.data.length == 1 || wrq->u.data.length == 2) {
+        if (copy_from_user
+            (&data, wrq->u.data.pointer, wrq->u.data.length * sizeof(int))) {
             PRINTM(MERROR, "Copy from user failed\n");
+            LEAVE();
             return -EFAULT;
         }
+        deep_sleep = data[0];
         if (deep_sleep == DEEP_SLEEP_OFF) {
             PRINTM(MINFO, "Exit Deep Sleep Mode\n");
-            woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MFALSE);
+            woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MFALSE, 0);
         } else if (deep_sleep == DEEP_SLEEP_ON) {
             PRINTM(MINFO, "Enter Deep Sleep Mode\n");
-            woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MTRUE);
+            if (wrq->u.data.length == 2)
+                idletime = data[1];
+            woal_set_deep_sleep(priv, MOAL_IOCTL_WAIT, MTRUE, idletime);
         } else {
             PRINTM(MERROR, "Unknown option = %lu\n", deep_sleep);
             LEAVE();
             return -EINVAL;
         }
-    } else if (wrq->u.data.length > 1) {
+    } else if (wrq->u.data.length > 2) {
         PRINTM(MERROR, "Invalid number of arguments %d\n", wrq->u.data.length);
         LEAVE();
         return -EINVAL;
@@ -1787,13 +1791,6 @@ woal_reg_read_write(moal_private * priv, struct iwreq *wrq)
         goto done;
     }
     reg->param.reg_rw.type = (t_u32) data[0];
-    if ((reg->param.reg_rw.type < MLAN_REG_MAC) ||
-        (reg->param.reg_rw.type > MLAN_REG_PMIC)
-        ) {
-        ret = -EINVAL;
-        goto done;
-    }
-
     reg->param.reg_rw.offset = (t_u32) data[1];
     if (data_length == 3)
         reg->param.reg_rw.value = (t_u32) data[2];
@@ -2974,74 +2971,6 @@ woal_sleep_pd(moal_private * priv, struct iwreq *wrq)
 }
 
 /**
- * @brief Set/Get module configuration
- * 
- * @param priv     A pointer to moal_private structure
- * @param wrq      A pointer to iwreq structure
- * 
- * @return         0 --success, otherwise fail
- */
-static int
-woal_fw_wakeup_method(moal_private * priv, struct iwreq *wrq)
-{
-    int ret = 0, data;
-    mlan_ds_pm_cfg *pm_cfg = NULL;
-    mlan_ioctl_req *req = NULL;
-
-    ENTER();
-
-    req = woal_alloc_mlan_ioctl_req(sizeof(mlan_ds_pm_cfg));
-    if (req == NULL) {
-        ret = -ENOMEM;
-        goto done;
-    }
-    pm_cfg = (mlan_ds_pm_cfg *) req->pbuf;
-
-    if (wrq->u.data.length > 1) {
-        ret = -EINVAL;
-        goto done;
-    }
-    if (!wrq->u.data.length) {
-        req->action = MLAN_ACT_GET;
-    } else {
-        req->action = MLAN_ACT_SET;
-        if (copy_from_user(&data, wrq->u.data.pointer, sizeof(int))) {
-            PRINTM(MINFO, "Copy from user failed\n");
-            ret = -EFAULT;
-            goto done;
-        }
-        if (data > 2) {
-            ret = -EINVAL;
-            goto done;
-        }
-        pm_cfg->param.fw_wakeup_method = data;
-    }
-
-    pm_cfg->sub_command = MLAN_OID_PM_CFG_FW_WAKEUP_METHOD;
-    req->req_id = MLAN_IOCTL_PM_CFG;
-
-    if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, req, MOAL_IOCTL_WAIT)) {
-        ret = -EFAULT;
-        goto done;
-    }
-
-    data = ((mlan_ds_pm_cfg *) req->pbuf)->param.fw_wakeup_method;
-
-    if (copy_to_user(wrq->u.data.pointer, &data, sizeof(int))) {
-        ret = -EFAULT;
-        goto done;
-    }
-    wrq->u.data.length = 1;
-
-  done:
-    if (req)
-        kfree(req);
-
-    LEAVE();
-    return ret;
-}
-
-/**
  * @brief Configuer sleep parameters
  *
  * @param priv         A pointer to moal_private structure
@@ -3057,11 +2986,13 @@ woal_sleep_params_ioctl(moal_private * priv, struct iwreq *wrq)
     mlan_ds_pm_cfg *pm = NULL;
     mlan_ds_sleep_params *psleep_params = NULL;
     int data[6] = { 0 }, i;
+#ifdef DEBUG_LEVEL1
     char err_str[][35] = { {"sleep clock error in ppm"},
     {"wakeup offset in usec"},
     {"clock stabilization time in usec"},
     {"value of reserved for debug"}
     };
+#endif
 
     ENTER();
 
@@ -4546,17 +4477,22 @@ woal_cmd52rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
            data);
 
     if (!rw) {
-        if (sdio_read_ioreg(priv->phandle->card, func, reg, &data) < 0) {
-            PRINTM(MERROR, "sdio_read_ioreg: reading register 0x%X failed\n",
-                   reg);
-            ret = MLAN_STATUS_FAILURE;
+        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        data =
+            sdio_readb(((struct sdio_mmc_card *) priv->phandle->card)->func,
+                       reg, &ret);
+        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (ret) {
+            PRINTM(MERROR, "sdio_readb: reading register 0x%X failed\n", reg);
             goto done;
         }
     } else {
-        if (sdio_write_ioreg(priv->phandle->card, func, reg, data) < 0) {
-            PRINTM(MERROR, "sdio_write_ioreg: writing register 0x%X failed\n",
-                   reg);
-            ret = MLAN_STATUS_FAILURE;
+        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        sdio_writeb(((struct sdio_mmc_card *) priv->phandle->card)->func, data,
+                    reg, &ret);
+        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (ret) {
+            PRINTM(MERROR, "sdio_writeb: writing register 0x%X failed\n", reg);
             goto done;
         }
     }
@@ -4637,10 +4573,12 @@ woal_cmd53rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
            func, reg, mode, blklen, blknum);
 
     if (!rw) {
-        if (sdio_read_iomem(priv->phandle->card, func, reg, mode,
-                            FIXED_ADDRESS, blknum, blklen, data) < 0)
-            PRINTM(MERROR, "sdio_read_iomem: reading memory 0x%x failed\n",
-                   reg);
+        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (!sdio_readsb
+            (((struct sdio_mmc_card *) priv->phandle->card)->func, data, reg,
+             total_len))
+            PRINTM(MERROR, "sdio_readsb: reading memory 0x%x failed\n", reg);
+        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
 
         if (copy_to_user(wrq->u.data.pointer, data, sizeof(data))) {
             PRINTM(MINFO, "Copy to user failed\n");
@@ -4657,10 +4595,12 @@ woal_cmd53rdwr_ioctl(moal_private * priv, struct iwreq *wrq)
         for (pos = 0; pos < total_len; pos++)
             data[pos] = buf[11 + (pos % pattern_len)];
 
-        if (sdio_write_iomem(priv->phandle->card, func, reg, mode,
-                             FIXED_ADDRESS, blknum, blklen, data) < 0)
-            PRINTM(MERROR, "sdio_write_iomem: writing memory 0x%x failed\n",
-                   reg);
+        sdio_claim_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
+        if (!sdio_writesb
+            (((struct sdio_mmc_card *) priv->phandle->card)->func, reg, data,
+             total_len))
+            PRINTM(MERROR, "sdio_writesb: writing memory 0x%x failed\n", reg);
+        sdio_release_host(((struct sdio_mmc_card *) priv->phandle->card)->func);
     }
 
   done:
@@ -5051,12 +4991,17 @@ woal_vsie_cfg_ioctl(moal_private * priv, struct iwreq *wrq)
 static int
 woal_set_get_ps_cfg(moal_private * priv, struct iwreq *wrq)
 {
-    int data[6], ret = 0;
+    int data[7], ret = 0;
     mlan_ds_pm_cfg *pm_cfg = NULL;
     mlan_ioctl_req *req = NULL;
-    int allowed = 5;
+    int allowed = 3;
+    int i = 3;
 
     ENTER();
+
+    allowed++;                  /* For ad-hoc awake period parameter */
+    allowed++;                  /* For beacon missing timeout parameter */
+    allowed += 2;               /* For delay to PS and PS mode parameters */
 
     req = woal_alloc_mlan_ioctl_req(sizeof(mlan_ds_pm_cfg));
     if (req == NULL) {
@@ -5094,12 +5039,36 @@ woal_set_get_ps_cfg(moal_private * priv, struct iwreq *wrq)
             ret = -EINVAL;
             goto done;
         }
-        if ((data[4] != DISABLE_BCN_MISS_TO) &&
-            ((data[4] < MIN_BCN_MISS_TO) || (data[4] > MAX_BCN_MISS_TO))) {
+        if ((data[i] != SPECIAL_ADHOC_AWAKE_PD) &&
+            ((data[i] < MIN_ADHOC_AWAKE_PD) ||
+             (data[i] > MAX_ADHOC_AWAKE_PD))) {
+            PRINTM(MERROR, "Invalid argument for adhoc awake period\n");
+            ret = -EINVAL;
+            goto done;
+        }
+        i++;
+        if ((data[i] != DISABLE_BCN_MISS_TO) &&
+            ((data[i] < MIN_BCN_MISS_TO) || (data[i] > MAX_BCN_MISS_TO))) {
             PRINTM(MERROR, "Invalid argument for beacon miss timeout\n");
             ret = -EINVAL;
             goto done;
         }
+        i++;
+        if (wrq->u.data.length < allowed - 1)
+            data[i] = DELAY_TO_PS_UNCHANGED;
+        else if ((data[i] < MIN_DELAY_TO_PS) || (data[i] > MAX_DELAY_TO_PS)) {
+            PRINTM(MERROR, "Invalid argument for delay to PS\n");
+            ret = -EINVAL;
+            goto done;
+        }
+        i++;
+        if ((data[i] != PS_MODE_UNCHANGED) && (data[i] != PS_MODE_AUTO) &&
+            (data[i] != PS_MODE_POLL) && (data[i] != PS_MODE_NULL)) {
+            PRINTM(MERROR, "Invalid argument for PS mode\n");
+            ret = -EINVAL;
+            goto done;
+        }
+        i++;
         req->action = MLAN_ACT_SET;
         memcpy(&pm_cfg->param.ps_cfg, (t_u32 *) data,
                sizeof(pm_cfg->param.ps_cfg));
@@ -5656,31 +5625,6 @@ woal_auth_type(moal_private * priv, struct iwreq *wrq)
     return ret;
 }
 
-/** 
- *  @brief ioctl function for get driver mode
- *   
- *  @param priv		A pointer to moal_private structure
- *  @param wrq 		A pointer to iwreq structure
- *  @return    		0 --success, otherwise fail
- */
-static int
-woal_get_drv_mode(moal_private * priv, struct iwreq *wrq)
-{
-    int ret = 0;
-    int mode = DRV_MODE_STA;
-
-    ENTER();
-
-    if (copy_to_user(wrq->u.data.pointer, &mode, sizeof(int))) {
-        ret = -EFAULT;
-        goto done;
-    }
-    wrq->u.data.length = 1;
-  done:
-    LEAVE();
-    return ret;
-}
-
 /********************************************************
 		Global Functions
 ********************************************************/
@@ -5796,9 +5740,6 @@ woal_do_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
             break;
         case WOAL_SLEEP_PD:
             ret = woal_sleep_pd(priv, wrq);
-            break;
-        case WOAL_FW_WAKEUP_METHOD:
-            ret = woal_fw_wakeup_method(priv, wrq);
             break;
         case WOAL_AUTH_TYPE:
             ret = woal_auth_type(priv, wrq);
@@ -6023,8 +5964,8 @@ woal_do_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
         }
         break;
 
-    case WOAL_DRV_MODE:
-        ret = woal_get_drv_mode(priv, wrq);
+    case WOAL_GET_BSS_TYPE:
+        ret = woal_get_bss_type(dev, req);
         break;
     default:
         ret = -EINVAL;
@@ -6704,8 +6645,15 @@ woal_request_scan(moal_private * priv,
     mlan_status ret = MLAN_STATUS_SUCCESS;
     mlan_ioctl_req *ioctl_req = NULL;
     mlan_ds_scan *scan = NULL;
-
+    mlan_status status = MLAN_STATUS_SUCCESS;
     ENTER();
+
+    if (MOAL_ACQ_SEMAPHORE_BLOCK(&priv->async_sem)) {
+        PRINTM(MERROR, "Acquire semaphore error, request_scan\n");
+        LEAVE();
+        return MLAN_STATUS_FAILURE;
+    }
+    priv->scan_pending_on_block = MTRUE;
 
     /* Allocate an IOCTL request buffer */
     ioctl_req = woal_alloc_mlan_ioctl_req(sizeof(mlan_ds_scan));
@@ -6726,32 +6674,26 @@ woal_request_scan(moal_private * priv,
         memcpy(scan->param.scan_req.scan_ssid.ssid,
                req_ssid->ssid, req_ssid->ssid_len);
         scan->param.scan_req.scan_ssid.ssid_len = req_ssid->ssid_len;
-
-        /* Send IOCTL request to MLAN */
-        if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, ioctl_req,
-                                                      wait_option)) {
-            ret = MLAN_STATUS_FAILURE;
-            goto done;
-        }
     } else {
         /* Normal scan */
         ioctl_req->req_id = MLAN_IOCTL_SCAN;
         ioctl_req->action = MLAN_ACT_SET;
 
         scan->sub_command = MLAN_OID_SCAN_NORMAL;
-
-        /* Send IOCTL request to MLAN */
-        if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, ioctl_req,
-                                                      wait_option)) {
-            ret = MLAN_STATUS_FAILURE;
-            goto done;
-        }
     }
-
+    /* Send IOCTL request to MLAN */
+    status = woal_request_ioctl(priv, ioctl_req, wait_option);
+    if (status == MLAN_STATUS_FAILURE) {
+        ret = MLAN_STATUS_FAILURE;
+        goto done;
+    }
   done:
-    if (ioctl_req)
+    if ((ioctl_req) && (status != MLAN_STATUS_PENDING))
         kfree(ioctl_req);
-
+    if (ret == MLAN_STATUS_FAILURE) {
+        priv->scan_pending_on_block = MFALSE;
+        MOAL_REL_SEMAPHORE(&priv->async_sem);
+    }
     LEAVE();
     return ret;
 }
@@ -6876,15 +6818,6 @@ woal_change_adhoc_chan(moal_private * priv, int channel)
     PRINTM(MCMND, "Updating Channel from %d to %d\n",
            (int) bss->param.bss_chan.channel, channel);
 
-    /* Set channel */
-    bss->param.bss_chan.channel = channel;
-    req->action = MLAN_ACT_SET;
-
-    /* Send IOCTL request to MLAN */
-    if (MLAN_STATUS_SUCCESS != woal_request_ioctl(priv, req, MOAL_IOCTL_WAIT)) {
-        ret = MLAN_STATUS_FAILURE;
-        goto done;
-    }
     if (bss_info.media_connected != MTRUE) {
         ret = MLAN_STATUS_SUCCESS;
         goto done;

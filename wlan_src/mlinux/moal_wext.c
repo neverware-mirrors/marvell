@@ -2040,7 +2040,6 @@ woal_set_scan(struct net_device *dev, struct iw_request_info *info,
 #ifdef REASSOCIATION
     moal_handle *handle = priv->phandle;
 #endif
-    union iwreq_data wrqu;
 #if WIRELESS_EXT >= 18
     struct iw_scan_req *req;
     struct iw_point *dwrq = (struct iw_point *) vwrq;
@@ -2049,6 +2048,11 @@ woal_set_scan(struct net_device *dev, struct iw_request_info *info,
 
     ENTER();
 
+    if (priv->scan_pending_on_block == MTRUE) {
+        PRINTM(MCMND, "scan already in processing...\n");
+        LEAVE();
+        return ret;
+    }
 #ifdef REASSOCIATION
     if (MOAL_ACQ_SEMAPHORE_BLOCK(&handle->reassoc_sem)) {
         PRINTM(MERROR, "Acquire semaphore error, woal_set_scan\n");
@@ -2068,27 +2072,19 @@ woal_set_scan(struct net_device *dev, struct iw_request_info *info,
 
             req_ssid.ssid_len = req->essid_len;
             memcpy(req_ssid.ssid, (t_u8 *) req->essid, req->essid_len);
-
-            if (MLAN_STATUS_SUCCESS != woal_request_scan(priv,
-                                                         MOAL_IOCTL_WAIT,
-                                                         &req_ssid)) {
+            if (MLAN_STATUS_SUCCESS !=
+                woal_request_scan(priv, MOAL_NO_WAIT, &req_ssid)) {
                 ret = -EFAULT;
                 goto done;
             }
-
-            memset(&wrqu, 0, sizeof(union iwreq_data));
-            wireless_send_event(priv->netdev, SIOCGIWSCAN, &wrqu, NULL);
         }
     } else {
 #endif
-        if (MLAN_STATUS_SUCCESS != woal_request_scan(priv, MOAL_IOCTL_WAIT,
-                                                     &req_ssid)) {
+        if (MLAN_STATUS_SUCCESS !=
+            woal_request_scan(priv, MOAL_NO_WAIT, &req_ssid)) {
             ret = -EFAULT;
             goto done;
         }
-
-        memset(&wrqu, 0, sizeof(union iwreq_data));
-        wireless_send_event(priv->netdev, SIOCGIWSCAN, &wrqu, NULL);
 #if WIRELESS_EXT >= 18
     }
 #endif
@@ -2179,11 +2175,13 @@ woal_set_essid(struct net_device *dev, struct iw_request_info *info,
         PRINTM(MINFO, "Requested new SSID = %s\n",
                (req_ssid.ssid_len > 0) ? (char *) req_ssid.ssid : "NULL");
 
-        /* Do specific SSID scanning */
-        if (MLAN_STATUS_SUCCESS != woal_request_scan(priv, MOAL_IOCTL_WAIT,
-                                                     &req_ssid)) {
-            ret = -EFAULT;
-            goto setessid_ret;
+        if (dwrq->flags != 0xFFFF) {
+            /* Do specific SSID scanning */
+            if (MLAN_STATUS_SUCCESS != woal_request_scan(priv, MOAL_IOCTL_WAIT,
+                                                         &req_ssid)) {
+                ret = -EFAULT;
+                goto setessid_ret;
+            }
         }
 
         memcpy(&ssid_bssid.ssid, &req_ssid, sizeof(mlan_802_11_ssid));
@@ -2340,6 +2338,9 @@ woal_get_scan(struct net_device *dev, struct iw_request_info *info,
     t_u8 element_len;
 
     ENTER();
+
+    if (priv->scan_pending_on_block == MTRUE)
+        return -EAGAIN;
 
     if (!(buf = kmalloc((buf_size), GFP_ATOMIC))) {
         PRINTM(MERROR, "Cannot allocate buffer!\n");
@@ -2593,6 +2594,7 @@ woal_get_scan(struct net_device *dev, struct iw_request_info *info,
         if ((current_val - current_ev) > IW_EV_LCP_LEN)
             current_ev = current_val;
     }
+
     dwrq->length = (current_ev - extra);
     dwrq->flags = 0;
 #endif
@@ -2734,7 +2736,8 @@ woal_get_wireless_stats(struct net_device *dev)
      * is issued in non-blocking way in such contexts and
      * blocking in other cases.
      */
-    if (write_can_lock(&dev_base_lock))
+    if (write_can_lock(&dev_base_lock)
+        && (!in_atomic() || current->exit_state))
         wait_option = MOAL_WSTATS_WAIT;
 
     priv->w_stats.status = woal_get_mode(priv, wait_option);

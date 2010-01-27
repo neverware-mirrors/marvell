@@ -12,9 +12,7 @@ Change Log:
 ************************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -765,7 +763,9 @@ wlan_11h_get_adhoc_start_channel(mlan_private * priv)
     /* 
      * Check that we are looking for a channel in the A Band
      */
-    if (adapter->adhoc_start_band == BAND_A) {
+    if ((adapter->adhoc_start_band & BAND_A)
+        || (adapter->adhoc_start_band & BAND_AN)
+        ) {
         /* 
          * Set default to the A Band default. Used if random selection fails
          *   or if 11h is not enabled
@@ -988,7 +988,9 @@ wlan_11h_process_start(mlan_private * priv,
 
     ENTER();
     if (wlan_11h_is_enabled(priv)
-        && (adapter->adhoc_start_band == BAND_A)
+        && ((adapter->adhoc_start_band & BAND_A)
+            || (adapter->adhoc_start_band & BAND_AN)
+        )
         ) {
         if (wlan_11d_get_state(priv) == DISABLE_11D) {
             /* No use having 11h enabled without 11d enabled */

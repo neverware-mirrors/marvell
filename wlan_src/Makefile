@@ -61,12 +61,38 @@ MODEXT = ko
 EXTRA_CFLAGS += -I$(PWD)/mlan
 EXTRA_CFLAGS += -DLINUX
 
+# KERNELDIR point to the installed kernel directory.
+# KERNELDIR can be set on the command line,
+# make KERNELDIR=/usr/src/arm/<arch-bsp-path>
+# Alternatively KERNELDIR can be set in the environment.
+# Default value for KERNELDIR is set below.
+KERNELDIR ?= /usr/src/arm/linux-2.6.25-pxa9xx
 
-KERNELVERSION_X86 := 	$(shell uname -r)
-KERNELDIR=/lib/modules/$(KERNELVERSION_X86)/build
+# CROSS_COMPILE specify the prefix used for all executables used
+# during compilation. Only gcc and related bin-utils executables
+# CROSS_COMPILE can be set on the command line 
+# make CROSS_COMPILE=</usr/local/arm/4.1.1/bin/>arm-linux-
+# Alternatively CROSS_COMPILE can be set in the environment.
+# Default value for CROSS_COMPILE is set below.
+CROSS_COMPILE ?= /usr/local/arm/4.1.1/bin/arm-linux-
+
+# INSTALLDIR specify the path to install the kernel module after
+# succesful compilation.
+# INSTALLDIR can be set on the command line 
+# make INSTALLDIR=/tftpboot/<rootfs>
+# Alternatively INSTALLDIR can be set in the environment.
+# Default value for INSTALL is set below.
+INSTALLDIR ?= /tftpboot/pxa9xx/root
+
+# ARCH specifies the architecture of the target processor, this kernel
+# module will run.
+# ARCH can be set on the command line
+# make ARCH=<arm/i386>
+# Alternatively ARCH can be set in the environment
+# Default values of ARCH for specific platform are set below.
+ARCH ?= arm
+
 LD += -S
-PLATFORM=syskt
-EXTRA_CFLAGS += -I$(PWD)/../io/sdio/$(PLATFORM) -I$(PWD)/../io/sdio/$(PLATFORM)/h
 BINDIR = ../bin_sd8787
 
 #############################################################################
@@ -158,17 +184,16 @@ endif
 
 obj-m := mlan.o
 mlan-objs := $(MLANOBJS)
-MOALOBJS += mlinux/moal_sdio.o
+MOALOBJS += mlinux/moal_sdio_mmc.o
 obj-m += sd8xxx.o
 sd8xxx-objs := $(MOALOBJS)
-obj-m += ../io/sdio/$(PLATFORM)/
 
 
 # Otherwise we were called directly from the command line; invoke the kernel build system.
 else
 
 default:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
 
 endif
 
@@ -193,8 +218,6 @@ build:		echo default
 	fi 
 	cp -f mlan.$(MODEXT) $(BINDIR)/mlan$(DBG).$(MODEXT)
 	cp -f sd8xxx.$(MODEXT) $(BINDIR)/sd8787$(DBG).$(MODEXT)
-	cp -f ../io/sdio/$(PLATFORM)/mrvlsdio.$(MODEXT) $(BINDIR)/
-	cp -rpf script/sdio_syskt/* $(BINDIR)/
 
 	cp -f README $(BINDIR)
 	$(MAKE) -C mapp/mlanconfig $@ INSTALLDIR=$(BINDIR)
@@ -211,12 +234,10 @@ clean:
 	-rm -rf .tmp_versions
 	$(MAKE) -C mapp/mlanconfig $@
 	$(MAKE) -C mapp/mlan2040coex $@
-	$(MAKE) -C ../io/sdio/$(PLATFORM) $@
 
 install: default
 
 	cp -f mlan.$(MODEXT) $(INSTALLDIR)/mlan$(DBG).$(MODEXT)
-	cp -f ../io/sdio/$(PLATFORM)/mrvlsdio.$(MODEXT) $(INSTALLDIR)
 	cp -f sd8xxx.$(MODEXT) $(INSTALLDIR)/sd8787$(DBG).$(MODEXT)
 	echo "sd8787 Driver Installed"
 

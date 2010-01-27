@@ -1,5 +1,0 @@
-ifconfig mlan0 down
-#cardctl suspend
-rmmod sd8xxx
-rmmod mlan
-./mrvlsdio_unload 

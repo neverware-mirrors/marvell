@@ -13,9 +13,7 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -155,6 +153,9 @@ wlan_init_priv(pmlan_private priv)
     priv->wmm_qosinfo = 0;
     priv->gen_null_pkg = MTRUE; /* Enable NULL Pkg generation */
     pmadapter->callbacks.moal_init_lock(&priv->rx_pkt_lock);
+    priv->pcurr_bcn_buf = MNULL;
+    priv->curr_bcn_size = 0;
+    pmadapter->callbacks.moal_init_lock(&priv->curr_bcn_buf_lock);
 
     for (i = 0; i < MAX_NUM_TID; i++)
         priv->addba_reject[i] = ADDBA_RSP_STATUS_ACCEPT;
@@ -243,23 +244,17 @@ wlan_allocate_adapter(pmlan_adapter pmadapter)
         return MLAN_STATUS_FAILURE;
     }
 #endif
-    if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
-        MLAN_BSS_TYPE_STA)
-        pmadapter->psleep_cfm =
-            wlan_alloc_mlan_buffer(&pmadapter->callbacks,
-                                   HEADER_ALIGNMENT +
-                                   sizeof(sleep_confirm_buffer));
 
-    if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
-        MLAN_BSS_TYPE_STA) {
-        if (!pmadapter->psleep_cfm) {
-            PRINTM(MERROR, "Failed to allocate sleep confirm buffers\n");
-            LEAVE();
-            return MLAN_STATUS_FAILURE;
-        }
-        head_ptr = (t_u8 *) ALIGN_ADDR(pmadapter->psleep_cfm->pbuf +
-                                       pmadapter->psleep_cfm->data_offset,
-                                       HEADER_ALIGNMENT);
+    pmadapter->psleep_cfm =
+        wlan_alloc_mlan_buffer(&pmadapter->callbacks,
+                               HEADER_ALIGNMENT +
+                               sizeof(opt_sleep_confirm_buffer));
+
+    if (pmadapter->psleep_cfm) {
+        head_ptr =
+            (t_u8 *) ALIGN_ADDR(pmadapter->psleep_cfm->pbuf +
+                                pmadapter->psleep_cfm->data_offset,
+                                HEADER_ALIGNMENT);
         pmadapter->psleep_cfm->data_offset +=
             (t_u32) (head_ptr -
                      (pmadapter->psleep_cfm->pbuf +
@@ -282,14 +277,13 @@ t_void
 wlan_init_adapter(pmlan_adapter pmadapter)
 {
     int i;
-    sleep_confirm_buffer *sleep_cfm_buf = MNULL;
+
+    opt_sleep_confirm_buffer *sleep_cfm_buf = MNULL;
 
     ENTER();
-    if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
-        MLAN_BSS_TYPE_STA)
-        sleep_cfm_buf =
-            (sleep_confirm_buffer *) (pmadapter->psleep_cfm->pbuf +
-                                      pmadapter->psleep_cfm->data_offset);
+    sleep_cfm_buf = (opt_sleep_confirm_buffer *) (pmadapter->psleep_cfm->pbuf +
+                                                  pmadapter->psleep_cfm->
+                                                  data_offset);
 
     pmadapter->cmd_sent = MFALSE;
     pmadapter->data_sent = MTRUE;
@@ -300,13 +294,14 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     for (i = 0; i < MAX_NUM_TID; i++) {
         pmadapter->tx_eligibility[i] = 1;
     }
+    pmadapter->mp_data_port_mask = DATA_PORT_MASK;
 
 #ifdef SDIO_MULTI_PORT_TX_AGGR
     pmadapter->mpa_tx.buf_len = 0;
     pmadapter->mpa_tx.pkt_cnt = 0;
     pmadapter->mpa_tx.start_port = 0;
 
-    pmadapter->mpa_tx.enabled = 1;
+    pmadapter->mpa_tx.enabled = 0;
     pmadapter->mpa_tx.pkt_aggr_limit = SDIO_MP_AGGR_DEF_PKT_LIMIT;
 #endif /* SDIO_MULTI_PORT_TX_AGGR */
 
@@ -315,7 +310,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->mpa_rx.pkt_cnt = 0;
     pmadapter->mpa_rx.start_port = 0;
 
-    pmadapter->mpa_rx.enabled = 1;
+    pmadapter->mpa_rx.enabled = 0;
     pmadapter->mpa_rx.pkt_aggr_limit = SDIO_MP_AGGR_DEF_PKT_LIMIT;
 #endif /* SDIO_MULTI_PORT_RX_AGGR */
 
@@ -332,7 +327,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->hw_status = WlanHardwareStatusInitializing;
 
     pmadapter->ps_mode = Wlan802_11PowerModeCAM;
-    pmadapter->ps_state = PS_STATE_FULL_POWER;
+    pmadapter->ps_state = PS_STATE_AWAKE;
     pmadapter->need_to_wakeup = MFALSE;
 
     /* Scan type */
@@ -357,9 +352,12 @@ wlan_init_adapter(pmlan_adapter pmadapter)
 
     pmadapter->local_listen_interval = 0;       /* default value in firmware
                                                    will be used */
-    pmadapter->fw_wakeup_method = WAKEUP_FW_UNCHANGED;
 
     pmadapter->is_deep_sleep = MFALSE;
+
+    pmadapter->delay_null_pkt = MFALSE;
+    pmadapter->delay_to_ps = 100;
+    pmadapter->enhanced_ps_mode = PS_MODE_AUTO;
 
     pmadapter->pm_wakeup_card_req = MFALSE;
 
@@ -369,9 +367,9 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->tx_buf_size = MLAN_TX_DATA_BUF_SIZE_2K;
 
     pmadapter->is_hs_configured = MFALSE;
-    pmadapter->hs_cfg.conditions = HOST_SLEEP_CFG_CANCEL;
-    pmadapter->hs_cfg.gpio = 0;
-    pmadapter->hs_cfg.gap = 0;
+    pmadapter->hs_cfg.params.hs_config.conditions = HOST_SLEEP_CFG_CANCEL;
+    pmadapter->hs_cfg.params.hs_config.gpio = 0;
+    pmadapter->hs_cfg.params.hs_config.gap = 0;
     pmadapter->hs_activated = MFALSE;
 
     memset(pmadapter->event_body, 0, sizeof(pmadapter->event_body));
@@ -380,6 +378,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     pmadapter->usr_dot_11n_dev_cap = 0;
     pmadapter->usr_dev_mcs_support = 0;
     pmadapter->chan_offset = 0;
+    pmadapter->adhoc_11n_enabled = MFALSE;
 
     /* Initialize 802.11d */
     wlan_11d_init(pmadapter);
@@ -389,22 +388,18 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     wlan_11h_init(pmadapter);
 
     wlan_wmm_init(pmadapter);
-    if (pmadapter->psleep_cfm)
+    if (pmadapter->psleep_cfm) {
         pmadapter->psleep_cfm->buf_type = MLAN_BUF_TYPE_CMD;
-
-    if ((wlan_get_priv(pmadapter, MLAN_BSS_TYPE_ANY))->bss_type ==
-        MLAN_BSS_TYPE_STA) {
-        pmadapter->psleep_cfm->data_len = sizeof(PS_CMD_ConfirmSleep);
-        memset(&sleep_cfm_buf->ps_cfm_sleep, 0, sizeof(PS_CMD_ConfirmSleep));
+        pmadapter->psleep_cfm->data_len = sizeof(HostCmd_DS_COMMAND);
+        memset(&sleep_cfm_buf->ps_cfm_sleep, 0, sizeof(HostCmd_DS_COMMAND));
         sleep_cfm_buf->ps_cfm_sleep.command =
-            wlan_cpu_to_le16(HostCmd_CMD_802_11_PS_MODE);
+            wlan_cpu_to_le16(HostCmd_CMD_802_11_PS_MODE_ENH);
         sleep_cfm_buf->ps_cfm_sleep.size =
-            wlan_cpu_to_le16(sizeof(PS_CMD_ConfirmSleep));
+            wlan_cpu_to_le16(sizeof(HostCmd_DS_COMMAND));
         sleep_cfm_buf->ps_cfm_sleep.result = 0;
-        sleep_cfm_buf->ps_cfm_sleep.action =
-            wlan_cpu_to_le16(HostCmd_SubCmd_Sleep_Confirmed);
+        sleep_cfm_buf->ps_cfm_sleep.params.psmode_enh.action =
+            wlan_cpu_to_le16(SLEEP_CONFIRM);
     }
-
     memset(&pmadapter->sleep_params, 0, sizeof(pmadapter->sleep_params));
     memset(&pmadapter->sleep_period, 0, sizeof(pmadapter->sleep_period));
     pmadapter->tx_lock_flag = MFALSE;
@@ -421,6 +416,7 @@ wlan_init_adapter(pmlan_adapter pmadapter)
     memset(&pmadapter->region_channel, 0, sizeof(pmadapter->region_channel));
     pmadapter->region_code = 0;
     pmadapter->bcn_miss_time_out = DEFAULT_BCN_MISS_TIMEOUT;
+    pmadapter->adhoc_awake_period = 0;
     memset(&pmadapter->arp_filter, 0, sizeof(pmadapter->arp_filter));
     pmadapter->arp_filter_size = 0;
 

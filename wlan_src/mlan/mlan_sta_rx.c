@@ -13,13 +13,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_rx.h"
 #include "mlan_11n_aggr.h"
 #include "mlan_11n_rxreorder.h"
 
@@ -234,11 +231,11 @@ mlan_process_sta_rx_packet(IN t_void * adapter, IN pmlan_buffer pmbuf)
     }
 
     /* Reorder and send to OS */
-    if ((prx_pd->rx_pkt_type == PKT_TYPE_BAR)
-        || (ret = mlan_11n_rxreorder_pkt(priv, prx_pd->seq_num,
-                                         prx_pd->priority, ta,
-                                         (t_u8) prx_pd->rx_pkt_type,
-                                         (void *) pmbuf))
+    if ((ret = mlan_11n_rxreorder_pkt(priv, prx_pd->seq_num,
+                                      prx_pd->priority, ta,
+                                      (t_u8) prx_pd->rx_pkt_type,
+                                      (void *) pmbuf)) ||
+        (prx_pd->rx_pkt_type == PKT_TYPE_BAR)
         ) {
         if ((ret =
              pmadapter->callbacks.moal_recv_complete(pmadapter->pmoal_handle,

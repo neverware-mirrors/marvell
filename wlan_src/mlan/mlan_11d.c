@@ -11,9 +11,7 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -24,6 +22,18 @@ Change log:
 
 /** Default Tx power */
 #define TX_PWR_DEFAULT  10
+
+/** Universal region code */
+#define UNIVERSAL_REGION_CODE   0xff
+
+/** Region code mapping */
+typedef struct _region_code_mapping
+{
+    /** Region */
+    t_u8 region[COUNTRY_CODE_LEN];
+    /** Code */
+    t_u8 code;
+} region_code_mapping_t;
 
 /** Region code mapping table */
 static region_code_mapping_t region_code_mapping[] = {
@@ -1101,6 +1111,8 @@ wlan_11d_create_dnld_countryinfo(mlan_private * pmpriv, t_u8 band)
         case BAND_A:
             switch (band) {
             case BAND_A:
+            case BAND_AN:
+            case BAND_A | BAND_AN:
                 break;
             default:
                 continue;
@@ -1112,6 +1124,9 @@ wlan_11d_create_dnld_countryinfo(mlan_private * pmpriv, t_u8 band)
             case BAND_B:
             case BAND_G:
             case BAND_G | BAND_B:
+            case BAND_GN:
+            case BAND_G | BAND_GN:
+            case BAND_B | BAND_G | BAND_GN:
                 break;
             default:
                 continue;

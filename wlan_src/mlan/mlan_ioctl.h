@@ -98,7 +98,6 @@ enum
     MLAN_OID_PM_CFG_DEEP_SLEEP,
     MLAN_OID_PM_CFG_SLEEP_PD,
     MLAN_OID_PM_CFG_PS_CFG,
-    MLAN_OID_PM_CFG_FW_WAKEUP_METHOD,
     MLAN_OID_PM_CFG_SLEEP_PARAMS,
 
     /* WMM Configuration Group */
@@ -178,15 +177,6 @@ enum
     MLAN_ACT_ENABLE = 1
 };
 
-/** Type enumeration for the command result */
-typedef MLAN_PACK_START enum _mlan_cmd_result_e
-{
-    MLAN_CMD_RESULT_SUCCESS = 0,
-    MLAN_CMD_RESULT_FAILURE = 1,
-    MLAN_CMD_RESULT_TIMEOUT = 2,
-    MLAN_CMD_RESULT_INVALID_DATA = 3
-} MLAN_PACK_END mlan_cmd_result_e;
-
 /** Enumeration for scan mode */
 enum
 {
@@ -219,7 +209,7 @@ enum
  *  Fixed field information returned for the scan response in the IOCTL
  *    response.
  */
-typedef MLAN_PACK_START struct _wlan_get_scan_table_fixed
+typedef struct _wlan_get_scan_table_fixed
 {
     /** BSSID of this network */
     t_u8 bssid[MLAN_MAC_ADDR_LENGTH];
@@ -229,12 +219,12 @@ typedef MLAN_PACK_START struct _wlan_get_scan_table_fixed
     t_u8 rssi;
     /** TSF value from the firmware at packet reception */
     t_u64 network_tsf;
-} MLAN_PACK_END wlan_get_scan_table_fixed;
+} wlan_get_scan_table_fixed;
 
 /**
  *  Sructure to retrieve the scan table
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     /**
      *  - Zero based scan entry to start retrieval in command request
@@ -246,13 +236,13 @@ typedef MLAN_PACK_START struct
      *   Each struct is padded to the nearest 32 bit boundary.
      */
     t_u8 scan_table_entry_buf[1];
-} MLAN_PACK_END wlan_ioctl_get_scan_table_info;
+} wlan_ioctl_get_scan_table_info;
 
 /**
  *  Structure passed in the wlan_ioctl_get_scan_table_info for each
  *    BSS returned in the WLAN_GET_SCAN_RESP IOCTL
  */
-typedef MLAN_PACK_START struct _wlan_ioctl_get_scan_table_entry
+typedef struct _wlan_ioctl_get_scan_table_entry
 {
     /**
      *  Fixed field length included in the response.
@@ -285,7 +275,7 @@ typedef MLAN_PACK_START struct _wlan_ioctl_get_scan_table_entry
      *   - IEEE Infomation Elements; variable number & length per 802.11 spec
      */
     t_u8 bss_info_buffer[1];
-} MLAN_PACK_END wlan_ioctl_get_scan_table_entry;
+} wlan_ioctl_get_scan_table_entry;
 
 /** Type definition of mlan_scan_time_params */
 typedef struct _mlan_scan_time_params
@@ -1110,6 +1100,17 @@ typedef struct _mlan_ds_hs_cfg
 /** Disable deep sleep mode */
 #define DEEP_SLEEP_OFF 0
 
+/** Default idle time for auto deep sleep */
+#define DEEP_SLEEP_ILDE_TIME	100
+
+typedef struct _mlan_ds_auto_ds
+{
+    /** auto ds mode, 0 - disable, 1 - enable */
+    t_u16 auto_ds;
+    /** auto ds idle time */
+    t_u16 idletime;
+} mlan_ds_auto_ds;
+
 /** Type definition of mlan_ds_inactivity_to for MLAN_OID_PM_CFG_INACTIVITY_TO */
 typedef struct _mlan_ds_inactivity_to
 {
@@ -1143,12 +1144,35 @@ typedef struct _mlan_ds_inactivity_to
 /** Minimum listen interval */
 #define MIN_LISTEN_INTERVAL     0
 
+/** Minimum adhoc awake period */
+#define MIN_ADHOC_AWAKE_PD      0
+/** Maximum adhoc awake period */
+#define MAX_ADHOC_AWAKE_PD      31
+/** Special adhoc awake period */
+#define SPECIAL_ADHOC_AWAKE_PD  255
+
 /** Minimum beacon miss timeout */
 #define MIN_BCN_MISS_TO         0
 /** Maximum beacon miss timeout */
 #define MAX_BCN_MISS_TO         50
 /** Disable beacon miss timeout */
 #define DISABLE_BCN_MISS_TO     65535
+
+/** Minimum delay to PS */
+#define MIN_DELAY_TO_PS         0
+/** Maximum delay to PS */
+#define MAX_DELAY_TO_PS         65535
+/* Delay to PS unchanged */
+#define DELAY_TO_PS_UNCHANGED   (-1)
+
+/** PS mode: Unchanged */
+#define PS_MODE_UNCHANGED       0
+/** PS mode: Auto */
+#define PS_MODE_AUTO            1
+/** PS mode: Poll */
+#define PS_MODE_POLL            2
+/** PS mode: Null */
+#define PS_MODE_NULL            3
 
 /** Type definition of mlan_ds_ps_cfg for MLAN_OID_PM_CFG_PS_CFG */
 typedef struct _mlan_ds_ps_cfg
@@ -1159,8 +1183,14 @@ typedef struct _mlan_ds_ps_cfg
     t_u32 multiple_dtim_interval;
     /** Listen interval */
     t_u32 listen_interval;
+    /** Adhoc awake period */
+    t_u32 adhoc_awake_period;
     /** Beacon miss timeout */
     t_u32 bcn_miss_timeout;
+    /** Delay to PS */
+    t_s32 delay_to_ps;
+    /** PS mode */ 
+      t_u32 ps_mode;
 } mlan_ds_ps_cfg, *pmlan_ds_ps_cfg;
 
 /** Type definition of mlan_ds_sleep_params for MLAN_OID_PM_CFG_SLEEP_PARAMS */
@@ -1193,15 +1223,13 @@ typedef struct _mlan_ds_pm_cfg
         /** Host Sleep configuration for MLAN_OID_PM_CFG_HS_CFG */
         mlan_ds_hs_cfg hs_cfg;
         /** Deep sleep mode for MLAN_OID_PM_CFG_DEEP_SLEEP */
-        t_u32 deep_sleep;
+        mlan_ds_auto_ds auto_deep_sleep;
         /** Inactivity timeout for MLAN_OID_PM_CFG_INACTIVITY_TO */
         mlan_ds_inactivity_to inactivity_to;
         /** Sleep period for MLAN_OID_PM_CFG_SLEEP_PD */
         t_u32 sleep_period;
         /** PS configuration parameters for MLAN_OID_PM_CFG_PS_CFG */
         mlan_ds_ps_cfg ps_cfg;
-        /** FW wakeup method for MLAN_OID_PM_CFG_FW_WAKEUP_METHOD */
-        t_u32 fw_wakeup_method;
         /** PS configuration parameters for MLAN_OID_PM_CFG_SLEEP_PARAMS */
         mlan_ds_sleep_params sleep_params;
     } param;
@@ -1210,34 +1238,6 @@ typedef struct _mlan_ds_pm_cfg
 /*-----------------------------------------------------------------*/
 /** WMM Configuration Group */
 /*-----------------------------------------------------------------*/
-/** Type enumeration of WMM AC_QUEUES */
-typedef MLAN_PACK_START enum _mlan_wmm_ac_e
-{
-    WMM_AC_BK,
-    WMM_AC_BE,
-    WMM_AC_VI,
-    WMM_AC_VO
-} MLAN_PACK_END mlan_wmm_ac_e;
-
-/** Type enumeration for the action field in the Queue Config command */
-typedef MLAN_PACK_START enum _mlan_wmm_queue_config_action_e
-{
-    MLAN_WMM_QUEUE_CONFIG_ACTION_GET = 0,
-    MLAN_WMM_QUEUE_CONFIG_ACTION_SET = 1,
-    MLAN_WMM_QUEUE_CONFIG_ACTION_DEFAULT = 2,
-    MLAN_WMM_QUEUE_CONFIG_ACTION_MAX
-} MLAN_PACK_END mlan_wmm_queue_config_action_e;
-
-/** Type enumeration for the action field in the queue stats command */
-typedef MLAN_PACK_START enum _mlan_wmm_queue_stats_action_e
-{
-    MLAN_WMM_STATS_ACTION_START = 0,
-    MLAN_WMM_STATS_ACTION_STOP = 1,
-    MLAN_WMM_STATS_ACTION_GET_CLR = 2,
-    MLAN_WMM_STATS_ACTION_SET_CFG = 3,  /* Not currently used */
-    MLAN_WMM_STATS_ACTION_GET_CFG = 4,  /* Not currently used */
-    MLAN_WMM_STATS_ACTION_MAX
-} MLAN_PACK_END mlan_wmm_queue_stats_action_e;
 
 /** WMM TSpec size */
 #define MLAN_WMM_TSPEC_SIZE             63
@@ -1257,14 +1257,14 @@ typedef MLAN_PACK_START enum _mlan_wmm_queue_stats_action_e
  *
  *  @sa woal_wmm_addts_req_ioctl
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     mlan_cmd_result_e cmd_result;                           /**< Firmware execution result */
     t_u32 timeout_ms;                                       /**< Timeout value in milliseconds */
     t_u8 ieee_status_code;                                  /**< IEEE status code */
     t_u8 tspec_data[MLAN_WMM_TSPEC_SIZE];                   /**< TSPEC to send in the ADDTS */
     t_u8 addts_extra_ie_buf[MLAN_WMM_ADDTS_EXTRA_IE_BYTES]; /**< ADDTS extra IE buffer */
-} MLAN_PACK_END wlan_ioctl_wmm_addts_req_t;
+} wlan_ioctl_wmm_addts_req_t;
 
 /**
  *  @brief IOCTL structure to send a DELTS request.
@@ -1274,12 +1274,12 @@ typedef MLAN_PACK_START struct
  *
  *  @sa woal_wmm_delts_req_ioctl
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     mlan_cmd_result_e cmd_result;           /**< Firmware execution result */
     t_u8 ieee_reason_code;                  /**< IEEE reason code sent, unused for WMM */
     t_u8 tspec_data[MLAN_WMM_TSPEC_SIZE];   /**< TSPEC to send in the DELTS */
-} MLAN_PACK_END wlan_ioctl_wmm_delts_req_t;
+} wlan_ioctl_wmm_delts_req_t;
 
 /**
  *  @brief IOCTL structure to configure a specific AC Queue's parameters
@@ -1291,13 +1291,13 @@ typedef MLAN_PACK_START struct
  *
  *  @sa woal_wmm_queue_config_ioctl
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     mlan_wmm_queue_config_action_e action;    /**< Set, Get, or Default */
     mlan_wmm_ac_e access_category;            /**< WMM_AC_BK(0) to WMM_AC_VO(3) */
     t_u16 msdu_lifetime_expiry;               /**< lifetime expiry in TUs */
     t_u8 supported_rates[10];                 /**< Not supported yet */
-} MLAN_PACK_END wlan_ioctl_wmm_queue_config_t;
+} wlan_ioctl_wmm_queue_config_t;
 
 /**
  *  @brief IOCTL structure to start, stop, and get statistics for a WMM AC
@@ -1308,7 +1308,7 @@ typedef MLAN_PACK_START struct
  *
  *  @sa woal_wmm_queue_stats_ioctl
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     /** Action of Queue Config : Start, Stop, or Get */
     mlan_wmm_queue_stats_action_e action;
@@ -1337,14 +1337,14 @@ typedef MLAN_PACK_START struct
      *  [6] - 50ms <= delay < msduLifetime (TUs)
      */
     t_u16 delay_histogram[MLAN_WMM_STATS_PKTS_HIST_BINS];
-} MLAN_PACK_END wlan_ioctl_wmm_queue_stats_t,
+} wlan_ioctl_wmm_queue_stats_t,
 /** Type definition of mlan_ds_wmm_queue_stats for MLAN_OID_WMM_CFG_QUEUE_STATS */
   mlan_ds_wmm_queue_stats, *pmlan_ds_wmm_queue_stats;
 
 /** 
  *  @brief IOCTL sub structure for a specific WMM AC Status
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     /** WMM Acm */
     t_u8 wmm_acm;
@@ -1354,7 +1354,7 @@ typedef MLAN_PACK_START struct
     t_u8 flow_created;
     /** Disabled flag */
     t_u8 disabled;
-} MLAN_PACK_END wlan_ioctl_wmm_queue_status_ac_t;
+} wlan_ioctl_wmm_queue_status_ac_t;
 
 /**
  *  @brief IOCTL structure to retrieve the WMM AC Queue status
@@ -1365,11 +1365,11 @@ typedef MLAN_PACK_START struct
  *
  *  @sa woal_wmm_queue_status_ioctl
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     /** WMM AC queue status */
     wlan_ioctl_wmm_queue_status_ac_t ac_status[MLAN_WMM_MAX_AC_QUEUES];
-} MLAN_PACK_END wlan_ioctl_wmm_queue_status_t,
+} wlan_ioctl_wmm_queue_status_t,
 /** Type definition of mlan_ds_wmm_queue_status for MLAN_OID_WMM_CFG_QUEUE_STATUS */
   mlan_ds_wmm_queue_status, *pmlan_ds_wmm_queue_status;
 
@@ -1377,7 +1377,7 @@ typedef MLAN_PACK_START struct
  *  @brief IOCTL structure for a Traffic stream status.
  *
  */
-typedef MLAN_PACK_START struct
+typedef struct
 {
     /** TSID: Range: 0->7 */
     t_u8 tid;
@@ -1393,7 +1393,7 @@ typedef MLAN_PACK_START struct
     t_u8 flow_dir;
     /** Medium time granted for the TSID */
     t_u16 medium_time;
-} MLAN_PACK_END wlan_ioctl_wmm_ts_status_t,
+} wlan_ioctl_wmm_ts_status_t,
 /** Type definition of mlan_ds_wmm_ts_status for MLAN_OID_WMM_CFG_TS_STATUS */
   mlan_ds_wmm_ts_status, *pmlan_ds_wmm_ts_status;
 
@@ -1586,7 +1586,8 @@ enum
     MLAN_REG_MAC = 1,
     MLAN_REG_BBP,
     MLAN_REG_RF,
-    MLAN_REG_PMIC
+    MLAN_REG_PMIC,
+    MLAN_REG_CAU,
 };
 
 /** Type definition of mlan_ds_reg_rw for MLAN_OID_REG_RW */
@@ -1685,8 +1686,6 @@ typedef struct _mlan_ds_bca_cfg
 /*-----------------------------------------------------------------*/
 /** Miscellaneous Configuration Group */
 /*-----------------------------------------------------------------*/
-/** Max Ie length */
-#define MAX_IE_SIZE             256
 
 /** CMD buffer size */
 #define MLAN_SIZE_OF_CMD_BUFFER 2048

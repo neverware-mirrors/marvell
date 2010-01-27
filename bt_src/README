@@ -28,15 +28,16 @@
 
 	a) Copy sd8790.bin | sd8787.bin | ... to /lib/firmware/mrvl/ directory, 
 	   create the directory if it doesn't exist.
-	b) Install sdio bus driver and bluetooth driver,
-		./load bt8688 | bt8790 | ...
+	b) Install bluetooth driver,
+		insmod bt8688.ko | bt8790.ko | ...
 	c) Uninstall bluetooth driver and sdio bus driver,
-		./unload
+		hciconfig hciX down
+		rmmod bt8xxx
 
-3) cat /proc/net/mbt/hcix/config
+3) cat /proc/mbt/hcix/config
    This command is used to get the current driver settings. 
 
-4) cat /proc/net/mbt/hcix/status
+4) cat /proc/mbt/hcix/status
    This command is used to get driver status
 
 5) proc commands to config bluetooth parameters. 
@@ -54,7 +55,7 @@ drvdbg=[n]
 	bit 30: INFO 		PRINTM(INFO,...)
 
 	Usage:
-		echo "drvdbg=0x7" > /proc/net/mbt/hcix/config		#enable MSG,FATAL,ERROR messages
+		echo "drvdbg=0x7" > /proc/mbt/hcix/config		#enable MSG,FATAL,ERROR messages
 
 gpio_gap=[n]
    This command is used to configure the host sleep parameters.
@@ -67,11 +68,11 @@ gpio_gap=[n]
 	where Gap is the gap in milli seconds between wakeup signal and wakeup event 
 		or 0xff for special setting.
 	Usage:
-		echo "gpio_gap=0xff80" > /proc/net/mbt/hcix/config   	# use Interface (e.g. SDIO)
-		echo "hscfgcmd=1" > /proc/net/mbt/hcix/config		# gap = 0x80
+		echo "gpio_gap=0xff80" > /proc/mbt/hcix/config   	# use Interface (e.g. SDIO)
+		echo "hscfgcmd=1" > /proc/mbt/hcix/config		# gap = 0x80
 
-		echo "gpio_gap=0x03ff" > /proc/net/mbt/hcix/config   	# use gpio 3
-		echo "hscfgcmd=1" > /proc/net/mbt/hcix/config		# and special host sleep mode
+		echo "gpio_gap=0x03ff" > /proc/mbt/hcix/config   	# use gpio 3
+		echo "hscfgcmd=1" > /proc/mbt/hcix/config		# and special host sleep mode
 
 psmode=[n]
     This command is used to enable/disable auto sleep mode
@@ -80,11 +81,11 @@ psmode=[n]
 			1 	-- Enable auto sleep mode
 			0 	-- Disable auto sleep mode
 	Usage:
-		echo "psmode=1" > /proc/net/mbt/hcix/config		#enable power save mode
-		echo "pscmd=1" > /proc/net/mbt/hcix/config
+		echo "psmode=1" > /proc/mbt/hcix/config			#enable power save mode
+		echo "pscmd=1" > /proc/mbt/hcix/config
 
-		echo "psmode=0" > /proc/net/mbt/hcix/config		#disable power save mode
-		echo "pscmd=1" > /proc/net/mbt/hcix/config
+		echo "psmode=0" > /proc/mbt/hcix/config			#disable power save mode
+		echo "pscmd=1" > /proc/mbt/hcix/config
 		
 						
 

@@ -15,14 +15,10 @@ Change Log:
 ************************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_rx.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_sdio.h"
 

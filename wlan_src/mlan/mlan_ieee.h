@@ -34,6 +34,10 @@ typedef enum _WLAN_802_11_NETWORK_TYPE
 /** Maximum size of IEEE Information Elements */
 #define IEEE_MAX_IE_SIZE      256
 
+#ifdef PRAGMA_PACK
+#pragma pack(push, 1)
+#endif
+
 /** IEEE Type definitions  */
 typedef MLAN_PACK_START enum _IEEEtypes_ElementId_e
 {
@@ -701,6 +705,10 @@ typedef struct
     IEEEtypes_IBSS_DFS_t ibss_dfs;                /**< IBSS DFS Element IE */
 
 } wlan_11h_bss_info_t;
+
+#ifdef PRAGMA_PACK
+#pragma pack(pop)
+#endif
 
 /** BSSDescriptor_t
  *    Structure used to store information for beacon/probe response

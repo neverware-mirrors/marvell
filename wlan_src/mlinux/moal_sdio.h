@@ -26,7 +26,10 @@ Change log:
 #ifndef	_MOAL_SDIO_H
 #define	_MOAL_SDIO_H
 
-#include <sdio.h>
+#include        <linux/mmc/sdio.h>
+#include        <linux/mmc/sdio_ids.h>
+#include        <linux/mmc/sdio_func.h>
+#include        <linux/mmc/card.h>
 
 #include "moal_main.h"
 
@@ -78,11 +81,14 @@ mlan_status woal_register_dev(moal_handle * handle);
 /** Unregister device function */
 void woal_unregister_dev(moal_handle * handle);
 
-/** Disable interrupt-to-host function */
-int woal_sdio_disable_host_int(moal_handle * handle);
-/** Enable interrupt-to-host function */
-int woal_sdio_enable_host_int(moal_handle * handle);
-
 int woal_sdio_set_bus_clock(moal_handle * handle, t_u8 option);
+/** Structure: SDIO MMC card */
+struct sdio_mmc_card
+{
+        /** sdio_func structure pointer */
+    struct sdio_func *func;
+        /** moal_handle structure pointer */
+    moal_handle *handle;
+};
 
 #endif /* _MOAL_SDIO_H */

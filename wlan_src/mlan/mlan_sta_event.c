@@ -12,13 +12,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_11n.h"
 #include "mlan_11h.h"
@@ -119,11 +116,8 @@ wlan_reset_connect_state(pmlan_private priv)
     memset(&priv->curr_bss_params, 0x00, sizeof(priv->curr_bss_params));
 
     pmadapter->tx_lock_flag = MFALSE;
-    if (pmadapter->ps_state != PS_STATE_FULL_POWER) {
-        /* Make firmware exit PS mode */
-        PRINTM(MINFO, "Disconnected, so exit PS mode.\n");
-        wlan_exit_ps(priv);
-    }
+    pmadapter->ps_state = PS_STATE_AWAKE;
+    pmadapter->pm_wakeup_card_req = MFALSE;
 
     if ((wlan_11d_get_state(priv) == ENABLE_11D) &&
         (pmadapter->state_11d.user_enable_11d == DISABLE_11D)) {
@@ -221,15 +215,10 @@ mlan_process_sta_event(IN t_void * priv)
 
     /* Clear BSS_NO_BITS from event */
     eventcause &= EVENT_ID_MASK;
-
     switch (eventcause) {
     case EVENT_DUMMY_HOST_WAKEUP_SIGNAL:
-        PRINTM(MEVENT, "EVENT: DUMMY_HOST_WAKEUP_SIGNAL\n");
-        if (!pmadapter->hs_activated) {
-            PRINTM(MWARN, "DUMMY_HOST_WAKEUP_SIGNAL (HS_Deactivated)\n");
-        } else {
-            wlan_host_sleep_wakeup_event(pmpriv);
-        }
+        PRINTM(MERROR,
+               "Invalid EVENT: DUMMY_HOST_WAKEUP_SIGNAL, ignoring it\n");
         break;
     case EVENT_LINK_SENSED:
         PRINTM(MEVENT, "EVENT: LINK_SENSED\n");
@@ -259,11 +248,6 @@ mlan_process_sta_event(IN t_void * priv)
         PRINTM(MINFO, "EVENT: SLEEP\n");
         PRINTM(MEVENT, "_");
 
-        /* Handle unexpected PS SLEEP event */
-        if (pmadapter->ps_state == PS_STATE_FULL_POWER) {
-            PRINTM(MWARN, "EVENT: In FULL POWER mode - ignore PS SLEEP\n");
-            break;
-        }
         pmadapter->ps_state = PS_STATE_PRE_SLEEP;
 
         wlan_check_ps_cond(pmadapter);
@@ -272,38 +256,21 @@ mlan_process_sta_event(IN t_void * priv)
     case EVENT_PS_AWAKE:
         PRINTM(MINFO, "EVENT: AWAKE \n");
         PRINTM(MEVENT, "|");
-        pmadapter->pm_wakeup_card_req = MFALSE;
-        pmadapter->pm_wakeup_fw_try = MFALSE;
-        wlan_pm_reset_card(pmadapter);
-
-        /* Handle unexpected PS AWAKE event */
-        if (pmadapter->ps_state == PS_STATE_FULL_POWER) {
-            PRINTM(MWARN, "EVENT: In FULL POWER mode - ignore PS AWAKE\n");
-            break;
-        }
-
         pmadapter->tx_lock_flag = MFALSE;
-        if (MTRUE == wlan_check_last_packet_indication(pmpriv)) {
-            if (!pmadapter->data_sent && pmpriv->gen_null_pkg) {
-                wlan_send_null_packet(pmpriv,
-                                      MRVDRV_TxPD_POWER_MGMT_NULL_PACKET |
-                                      MRVDRV_TxPD_POWER_MGMT_LAST_PACKET);
-                pmadapter->tx_lock_flag = MTRUE;
+        if (pmadapter->sleep_period.period) {
+            if (MTRUE == wlan_check_last_packet_indication(pmpriv)) {
+                if (!pmadapter->data_sent && pmpriv->gen_null_pkg) {
+                    wlan_send_null_packet(pmpriv,
+                                          MRVDRV_TxPD_POWER_MGMT_NULL_PACKET |
+                                          MRVDRV_TxPD_POWER_MGMT_LAST_PACKET);
+                    pmadapter->ps_state = PS_STATE_SLEEP;
+                    return MLAN_STATUS_SUCCESS;
+                }
             }
         }
-
         pmadapter->ps_state = PS_STATE_AWAKE;
-
-        if (pmadapter->need_to_wakeup == MTRUE) {
-            /* 
-             * Wait for the command processing to finish
-             * before resuming sending. 
-             * pmadapter->need_to_wakeup will be set to MFALSE 
-             * in PSWakup()
-             */
-            PRINTM(MEVENT, "Waking up...\n");
-            wlan_exit_ps(pmpriv);
-        }
+        pmadapter->pm_wakeup_card_req = MFALSE;
+        pmadapter->pm_wakeup_fw_try = MFALSE;
 
         break;
 
@@ -316,22 +283,11 @@ mlan_process_sta_event(IN t_void * priv)
         wlan_recv_event(pmpriv, MLAN_EVENT_ID_FW_DS_AWAKE, MNULL);
         break;
 
-    case EVENT_HOST_SLEEP_AWAKE:
-        PRINTM(MEVENT, "EVENT: HS_AWAKE\n");
-        pmadapter->pm_wakeup_card_req = MFALSE;
-        pmadapter->pm_wakeup_fw_try = MFALSE;
-        wlan_pm_reset_card(pmadapter);
-        /* 
-         * In BG SCAN mode w/ deep sleep, HOST_SLEEP_AWAKE
-         * event will be sent first, Deep Sleep Awake will
-         * be sent later. 
-         */
-        if (pmpriv->adapter->is_deep_sleep == MTRUE)
-            pmpriv->adapter->is_deep_sleep = MFALSE;
-
-        ret = wlan_prepare_cmd(pmpriv,
-                               HostCmd_CMD_802_11_WAKEUP_CONFIRM,
-                               0, 0, 0, MNULL);
+    case EVENT_HS_ACT_REQ:
+        PRINTM(MEVENT, "EVENT: HS_ACT_REQ\n");
+        ret = wlan_prepare_cmd(priv,
+                               HostCmd_CMD_802_11_HS_CFG_ENH,
+                               0, 0, MNULL, MNULL);
         break;
 
     case EVENT_MIC_ERR_UNICAST:

@@ -381,7 +381,7 @@ typedef struct
     t_u8 ieeeStatusCode;                            /**< IEEE status code */
     t_u8 tspecData[WMM_TSPEC_SIZE];                 /**< TSPEC to send in the ADDTS */
     t_u8 addtsExtraIEBuf[WMM_ADDTS_EXTRA_IE_BYTES]; /**< ADDTS extra IE buffer */
-} __ATTRIB_PACK__ wlan_ioctl_wmm_addts_req_t;
+} wlan_ioctl_wmm_addts_req_t;
 
 /**
  *  @brief IOCTL structure to send a DELTS request.
@@ -396,7 +396,7 @@ typedef struct
     mlan_wmm_tspec_result_e commandResult;  /**< Firmware execution result */
     t_u8 ieeeReasonCode;                    /**< IEEE reason code sent, unused for WMM */
     t_u8 tspecData[WMM_TSPEC_SIZE];         /**< TSPEC to send in the DELTS */
-} __ATTRIB_PACK__ wlan_ioctl_wmm_delts_req_t;
+} wlan_ioctl_wmm_delts_req_t;
 
 /**
  *  @brief IOCTL structure to configure a specific AC Queue's parameters
@@ -414,7 +414,7 @@ typedef struct
     mlan_wmm_ac_e accessCategory;           /**< WMM_AC_BK(0) to WMM_AC_VO(3) */
     t_u16 msduLifetimeExpiry;               /**< lifetime expiry in TUs */
     t_u8 supportedRates[10];                /**< Not supported yet */
-} __ATTRIB_PACK__ wlan_ioctl_wmm_queue_config_t;
+} wlan_ioctl_wmm_queue_config_t;
 
 /** Number of bins in the histogram for the HostCmd_DS_WMM_QUEUE_STATS */
 #define WMM_STATS_PKTS_HIST_BINS  7
@@ -450,7 +450,7 @@ typedef struct
      *  [6] - 50ms <= delay < msduLifetime (TUs)
      */
     t_u16 delayHistogram[WMM_STATS_PKTS_HIST_BINS];
-} __ATTRIB_PACK__ wlan_ioctl_wmm_queue_stats_t;
+} wlan_ioctl_wmm_queue_stats_t;
 
 /**
  *  @brief IOCTL and command sub structure for a Traffic stream status.
@@ -465,7 +465,7 @@ typedef struct
     t_u8 psb;               /**< Power save mode for TSID: 0 (legacy), 1 (UAPSD) */
     t_u8 flowDir;           /**< Upstream (0), Downlink(1), Bidirectional(3) */
     t_u16 mediumTime;       /**< Medium time granted for the TSID */
-} __ATTRIB_PACK__ HostCmd_DS_WMM_TS_STATUS,
+} HostCmd_DS_WMM_TS_STATUS,
     wlan_ioctl_wmm_ts_status_t, wlan_cmd_wmm_ts_status_t;
 
 /**
@@ -485,7 +485,7 @@ typedef struct
     t_u8 deliveryEnabled;
     /** trigger enabled */
     t_u8 triggerEnabled;
-} __ATTRIB_PACK__ wlan_ioctl_wmm_queue_status_ac_t;
+} wlan_ioctl_wmm_queue_status_ac_t;
 
 /**
  *  @brief IOCTL structure to retrieve the WMM AC Queue status
@@ -500,7 +500,7 @@ typedef struct
 {
     /** WMM AC queue status */
     wlan_ioctl_wmm_queue_status_ac_t acStatus[MAX_AC_QUEUES];
-} __ATTRIB_PACK__ wlan_ioctl_wmm_queue_status_t;
+} wlan_ioctl_wmm_queue_status_t;
 
 typedef struct _wlan_get_scan_table_fixed
 {
@@ -512,7 +512,7 @@ typedef struct _wlan_get_scan_table_fixed
     t_u8 rssi;
     /** TSF value from the firmware at packet reception */
     t_u64 network_tsf;
-} __ATTRIB_PACK__ wlan_get_scan_table_fixed;
+} wlan_get_scan_table_fixed;
 
 /**
  *  Structure passed in the wlan_ioctl_get_scan_table_info for each
@@ -551,7 +551,7 @@ typedef struct _wlan_ioctl_get_scan_table_entry
      *   - IEEE Infomation Elements; variable number & length per 802.11 spec
      */
     t_u8 bss_info_buffer[1];
-} __ATTRIB_PACK__ wlan_ioctl_get_scan_table_entry;
+} wlan_ioctl_get_scan_table_entry;
 
 /**
  *  Sructure to retrieve the scan table
@@ -568,7 +568,7 @@ typedef struct
      *   Each struct is padded to the nearest 32 bit boundary.
      */
     t_u8 scan_table_entry_buf[1];
-} __ATTRIB_PACK__ wlan_ioctl_get_scan_table_info;
+} wlan_ioctl_get_scan_table_info;
 
 typedef struct
 {

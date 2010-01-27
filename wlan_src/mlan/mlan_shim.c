@@ -25,13 +25,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_sdio.h"
 
@@ -170,13 +167,6 @@ mlan_register(IN pmlan_device pmdevice, OUT t_void ** ppmlan_adapter)
 
     /* Save pmoal_handle */
     pmadapter->pmoal_handle = pmdevice->pmoal_handle;
-    pmadapter->int_mode = pmdevice->int_mode;
-    pmadapter->gpio_pin = pmdevice->gpio_pin;
-    if ((pmadapter->int_mode == INTMODE_GPIO) && (pmadapter->gpio_pin == 0)) {
-        PRINTM(MERROR, "SDIO_GPIO_INT_CONFIG: Invalid GPIO Pin\n");
-        ret = MLAN_STATUS_FAILURE;
-        goto error;
-    }
     /* card specific probing has been deferred until now .. */
     if (MLAN_STATUS_SUCCESS != (ret = wlan_sdio_probe(pmadapter))) {
         ret = MLAN_STATUS_FAILURE;
@@ -313,6 +303,8 @@ mlan_unregister(IN t_void * pmlan_adapter)
     /* Free private structures */
     for (i = 0; i < MLAN_MAX_BSS_NUM; i++) {
         if (pmadapter->priv[i]) {
+            wlan_free_curr_bcn(pmadapter->priv[i]);
+            pcb->moal_free_lock(pmadapter->priv[i]->curr_bcn_buf_lock);
             pcb->moal_mfree((t_u8 *) pmadapter->priv[i]);
         }
     }
@@ -458,6 +450,7 @@ mlan_shutdown_fw(IN t_void * pmlan_adapter)
 
     /* shut down mlan */
     PRINTM(MINFO, "Shutdown mlan...\n");
+
     pcb = &pmadapter->callbacks;
     /* Clean up Tx/Rx queues and delete BSS priority table */
     for (i = 0; i < MLAN_MAX_BSS_NUM; i++) {
@@ -538,6 +531,8 @@ mlan_main_process(IN t_void * pmlan_adapter)
 
         /* Handle pending SDIO interrupts if any */
         if (pmadapter->sdio_ireg) {
+            if (pmadapter->hs_activated == MTRUE)
+                wlan_process_hs_config(pmadapter);
             wlan_process_int_status(pmadapter);
         }
 
@@ -561,11 +556,8 @@ mlan_main_process(IN t_void * pmlan_adapter)
             /* We have tried to wakeup the card already */
             if (pmadapter->pm_wakeup_fw_try)
                 break;
-            /* Sleep state, no need to wake up the card */
-            if ((pmadapter->tx_lock_flag == MTRUE) ||
-                (pmadapter->ps_state == PS_STATE_PRE_SLEEP) ||
-                ((pmadapter->ps_state == PS_STATE_SLEEP)
-                 && (!pmadapter->pm_wakeup_card_req)))
+            if (pmadapter->ps_state != PS_STATE_AWAKE ||
+                (pmadapter->tx_lock_flag == MTRUE))
                 break;
 
             if (pmadapter->scan_processing || pmadapter->data_sent
@@ -612,20 +604,10 @@ mlan_main_process(IN t_void * pmlan_adapter)
          */
         if ((pmadapter->ps_state == PS_STATE_SLEEP)
             || (pmadapter->ps_state == PS_STATE_PRE_SLEEP)
+            || (pmadapter->ps_state == PS_STATE_SLEEP_CFM)
+            || (pmadapter->tx_lock_flag == MTRUE)
             )
             continue;
-
-        /* With new enhanced hs we can send command/data any time which will
-           cancel hs both in driver and firmware */
-        /* The hs_activated flag may be changed during processing of
-           HOST_SLEEP_ACTIVATE command response */
-        /* We cannot send command or data if both hs_activated and
-           pm_wakeup_card_req flags are set */
-        if (pmadapter->hs_activated && pmadapter->pm_wakeup_card_req) {
-            PRINTM(MWARN, "main_process: cannot send command or data, "
-                   "hs_activated=%d\n", pmadapter->hs_activated);
-            continue;
-        }
 
         if (!pmadapter->cmd_sent && !pmadapter->curr_cmd) {
             if (wlan_exec_next_cmd(pmadapter) == MLAN_STATUS_FAILURE) {
@@ -638,6 +620,25 @@ mlan_main_process(IN t_void * pmlan_adapter)
         if (!pmadapter->scan_processing && !pmadapter->data_sent &&
             !wlan_wmm_lists_empty(pmadapter)) {
             wlan_wmm_process_tx(pmadapter);
+            if (pmadapter->hs_activated == MTRUE) {
+                pmadapter->is_hs_configured = MFALSE;
+                wlan_host_sleep_activated_event(wlan_get_priv
+                                                (pmadapter, MLAN_BSS_TYPE_ANY),
+                                                MFALSE);
+            }
+        }
+
+        if (pmadapter->delay_null_pkt && !pmadapter->cmd_sent &&
+            !pmadapter->curr_cmd && !IS_COMMAND_PENDING(pmadapter) &&
+            wlan_wmm_lists_empty(pmadapter)) {
+            if (wlan_send_null_packet
+                (wlan_get_priv(pmadapter, MLAN_BSS_TYPE_STA),
+                 MRVDRV_TxPD_POWER_MGMT_NULL_PACKET |
+                 MRVDRV_TxPD_POWER_MGMT_LAST_PACKET)
+                == MLAN_STATUS_SUCCESS) {
+                pmadapter->delay_null_pkt = MFALSE;
+            }
+            break;
         }
 
     } while (MTRUE);
@@ -710,11 +711,6 @@ mlan_ioctl(IN t_void * adapter, IN pmlan_ioctl_req pioctl_req)
     if (pioctl_req->action == MLAN_ACT_CANCEL) {
         wlan_cancel_pending_ioctl(pmadapter, pioctl_req);
         ret = MLAN_STATUS_SUCCESS;
-        goto exit;
-    }
-    if (!wlan_is_ioctl_allowed(pmadapter, pioctl_req)) {
-        PRINTM(MMSG, "IOCTL is not allowed!\n");
-        ret = MLAN_STATUS_FAILURE;
         goto exit;
     }
     pmpriv = pmadapter->priv[pioctl_req->bss_num];

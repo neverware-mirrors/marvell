@@ -102,6 +102,11 @@ extern t_u32 wlan_wmm_process_association_req(pmlan_private priv,
                                               IEEEtypes_WmmParameter_t * pWmmIE,
                                               IEEEtypes_HTCap_t * pHTCap);
 
+/** setup wmm queue priorities */
+void wlan_wmm_setup_queue_priorities(pmlan_private priv,
+                                     IEEEtypes_WmmParameter_t * wmm_ie);
+/** Downgrade WMM priority queue */
+void wlan_wmm_setup_ac_downgrade(pmlan_private priv);
 /* 
  *  Functions used in the cmd handling routine
  */

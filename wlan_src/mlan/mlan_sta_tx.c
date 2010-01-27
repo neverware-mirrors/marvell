@@ -13,13 +13,10 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
-#include "mlan_tx.h"
 #include "mlan_wmm.h"
 #include "mlan_sdio.h"
 
@@ -91,7 +88,7 @@ mlan_process_sta_txpd(IN t_void * priv, IN pmlan_buffer pmbuf)
         plocal_tx_pd->tx_control
             = pmpriv->wmm.user_pri_pkt_tx_ctrl[plocal_tx_pd->priority];
 
-    if (pmadapter->ps_state != PS_STATE_FULL_POWER) {
+    if (pmadapter->ps_state != PS_STATE_AWAKE) {
         if (MTRUE == wlan_check_last_packet_indication(pmpriv)) {
             pmadapter->tx_lock_flag = MTRUE;
             plocal_tx_pd->flags = MRVDRV_TxPD_POWER_MGMT_LAST_PACKET;
@@ -133,11 +130,7 @@ wlan_send_null_packet(pmlan_private priv, t_u8 flags)
     pmlan_adapter pmadapter = priv->adapter;
     TxPD *ptx_pd;
 /* sizeof(TxPD) + Interface specific header */
-/* The will be required as Syskonnect has DMA boundary
-and if the end of memory allocated happens to fall in
-this boundary then there would be no interrupt genrated for
-DMA transfer complete */
-#define NULL_PACKET_HDR 256
+#define NULL_PACKET_HDR 64
     t_u32 data_len = NULL_PACKET_HDR + HEADER_ALIGNMENT;
     pmlan_buffer pmbuf = MNULL;
     t_u8 *ptr;
@@ -238,6 +231,14 @@ wlan_check_last_packet_indication(pmlan_private priv)
                 priv->wmm_qosinfo) || prop_ps)
 
             ret = MTRUE;
+    }
+    if (ret && !pmadapter->cmd_sent && !pmadapter->curr_cmd
+        && !IS_COMMAND_PENDING(pmadapter)) {
+        pmadapter->delay_null_pkt = MFALSE;
+        ret = MTRUE;
+    } else {
+        ret = MFALSE;
+        pmadapter->delay_null_pkt = MTRUE;
     }
     LEAVE();
     return ret;

@@ -14,9 +14,7 @@ Change Log:
     05/11/2009: initial version
 ************************************************************/
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -27,54 +25,6 @@ Change Log:
 /********************************************************
                 Local Variables
 ********************************************************/
-/** MOAL/MLAN IOCTL sub commands and MLAN action structure */
-typedef struct _ioctl_cmd
-{
-    /** IOCTL subcommand number */
-    t_u32 sub_cmd;
-    /** Action dependent */
-    t_u32 act;
-} ioctl_cmd;
-
-/** Action check is not needed */
-#define ACT_NOT_REQ 0
-
-/**
- * This table contains the MOAL/MLAN IOCTL sub commands and actions.
- * If the entry matches then the host sleep and deep sleep check 
- * is not required.
- */
-static ioctl_cmd allowed_cmds[] = {
-    {MLAN_OID_BSS_CHANNEL, ACT_NOT_REQ},
-    {MLAN_OID_BSS_CHANNEL_LIST, ACT_NOT_REQ},
-    {MLAN_OID_BSS_MAC_ADDR, MLAN_ACT_GET},
-    {MLAN_OID_BSS_FIND_BSS, ACT_NOT_REQ},
-    {MLAN_OID_IBSS_BCN_INTERVAL, ACT_NOT_REQ},
-    {MLAN_OID_IBSS_ATIM_WINDOW, ACT_NOT_REQ},
-    {MLAN_OID_BAND_CFG, ACT_NOT_REQ},
-    {MLAN_OID_GET_FW_INFO, ACT_NOT_REQ},
-    {MLAN_OID_GET_BSS_INFO, ACT_NOT_REQ},
-    {MLAN_OID_GET_DEBUG_INFO, ACT_NOT_REQ},
-    {MLAN_OID_SEC_CFG_AUTH_MODE, ACT_NOT_REQ},
-    {MLAN_OID_SEC_CFG_ENCRYPT_MODE, ACT_NOT_REQ},
-    {MLAN_OID_SEC_CFG_WPA_ENABLED, ACT_NOT_REQ},
-    {MLAN_OID_SEC_CFG_EWPA_ENABLED, ACT_NOT_REQ},
-    {MLAN_OID_SUPPORTED_RATES, ACT_NOT_REQ},
-    {MLAN_OID_PM_CFG_IEEE_PS, MLAN_ACT_GET},
-    {MLAN_OID_PM_CFG_HS_CFG, MLAN_ACT_GET},
-    {MLAN_OID_PM_CFG_DEEP_SLEEP, MLAN_ACT_GET},
-    {MLAN_OID_PM_CFG_PS_CFG, ACT_NOT_REQ},
-    {MLAN_OID_WMM_CFG_ENABLE, ACT_NOT_REQ},
-    {MLAN_OID_WMM_CFG_QOS, ACT_NOT_REQ},
-    {MLAN_OID_TID_ELIG_TBL, ACT_NOT_REQ},
-    {MLAN_OID_WPS_CFG_SESSION, ACT_NOT_REQ},
-    {MLAN_OID_11N_HTCAP_CFG, ACT_NOT_REQ},
-    {MLAN_OID_11N_CFG_AGGR_PRIO_TBL, ACT_NOT_REQ},
-    {MLAN_OID_11N_CFG_ADDBA_PARAM, ACT_NOT_REQ},
-    {MLAN_OID_11N_CFG_MAX_TX_BUF_SIZE, ACT_NOT_REQ},
-    {MLAN_OID_MISC_GEN_IE, ACT_NOT_REQ},
-    {MLAN_OID_MISC_REGION, ACT_NOT_REQ},
-};
 
 /********************************************************
                 Global Variables
@@ -87,65 +37,6 @@ static ioctl_cmd allowed_cmds[] = {
 /********************************************************
                 Global Functions
 ********************************************************/
-/** 
- *  @brief This function checks if the ioctl is allowed.
- * 
- *  @param pmadapter	A pointer to mlan_adapter structure
- *  @param pioctl_req	A pointer to ioctl request buffer
- *
- *  @return             MTRUE or MFALSE
- */
-t_u8
-wlan_is_ioctl_allowed(IN pmlan_adapter pmadapter, IN pmlan_ioctl_req pioctl_req)
-{
-    mlan_ds_pm_cfg *pm = (mlan_ds_pm_cfg *) pioctl_req->pbuf;
-    t_u8 ret = MTRUE;
-    t_u32 i;
-
-    ENTER();
-
-    if (pm->sub_command == MLAN_OID_PM_CFG_DEEP_SLEEP &&
-        pm->param.deep_sleep == DEEP_SLEEP_OFF) {
-        ret = MTRUE;
-        goto exit;
-    }
-    if (pm->sub_command == MLAN_OID_PM_CFG_HS_CFG &&
-        pm->param.hs_cfg.conditions == HOST_SLEEP_CFG_CANCEL) {
-        ret = MTRUE;
-        goto exit;
-    }
-    /* Check if the ioctl is allowed in host sleep and deep sleep mode */
-    for (i = 0; i < NELEMENTS(allowed_cmds); i++) {
-        if (allowed_cmds[i].sub_cmd == *(t_u32 *) pioctl_req->pbuf) {
-            if (allowed_cmds[i].act) {
-                if (allowed_cmds[i].act == pioctl_req->action) {
-                    ret = MTRUE;
-                    goto exit;
-                } else {
-                    /* Need to check the host sleep and deep sleep setting
-                       below */
-                    break;
-                }
-            }
-            ret = MTRUE;
-            goto exit;
-        }
-    }
-
-    if (pmadapter->is_hs_configured) {
-        PRINTM(MINFO, "IOCTL is blocked in host sleep mode\n");
-        ret = MFALSE;
-    }
-
-    if (pmadapter->is_deep_sleep == MTRUE) {
-        PRINTM(MINFO, "IOCTL is blocked in deep sleep mode\n");
-        ret = MFALSE;
-    }
-
-  exit:
-    LEAVE();
-    return ret;
-}
 
 /** 
  *  @brief send host cmd
@@ -390,12 +281,9 @@ wlan_pm_wakeup_card(IN pmlan_adapter pmadapter)
 
     ENTER();
     PRINTM(MCMND, "Wakeup device...\n");
-    if (pmadapter->fw_wakeup_method == WAKEUP_FW_THRU_GPIO) {
-        /* GPIO_PORT_TO_LOW(); */
-    } else
-        ret =
-            pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG,
-                                HOST_POWER_UP);
+    ret =
+        pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG,
+                            HOST_POWER_UP);
 
     LEAVE();
     return ret;
@@ -416,11 +304,7 @@ wlan_pm_reset_card(IN pmlan_adapter pmadapter)
 
     ENTER();
 
-    if (pmadapter->fw_wakeup_method == WAKEUP_FW_THRU_GPIO) {
-        /* GPIO_PORT_TO_HIGH(); */
-    } else
-        ret =
-            pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG, 0);
+    ret = pcb->moal_write_reg(pmadapter->pmoal_handle, CONFIGURATION_REG, 0);
 
     LEAVE();
     return ret;

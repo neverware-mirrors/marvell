@@ -575,6 +575,32 @@ woal_set_debug_info(moal_private * priv, t_u8 wait_option,
 #endif /* PROC_DEBUG */
 
 /** 
+ *  @brief ioctl function get BSS type
+ *   
+ *  @param dev      A pointer to net_device structure
+ *  @param req      A pointer to ifreq structure
+ *  @return         MLAN_STATUS_SUCCESS -- success, otherwise fail
+ */
+mlan_status
+woal_get_bss_type(struct net_device * dev, struct ifreq * req)
+{
+    mlan_status ret = MLAN_STATUS_SUCCESS;
+    moal_private *priv = (moal_private *) netdev_priv(dev);
+    int bss_type;
+
+    ENTER();
+
+    bss_type = (int) priv->bss_type;
+    if (copy_to_user(req->ifr_data, &bss_type, sizeof(int))) {
+        PRINTM(MINFO, "Copy to user failed!\n");
+        ret = -EFAULT;
+    }
+
+    LEAVE();
+    return ret;
+}
+
+/** 
  *  @brief Get Host Sleep parameters
  *
  *  @param priv         A pointer to moal_private structure

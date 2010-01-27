@@ -1,3 +1,0 @@
-#cardctl resume
-./mrvlsdio_load
-insmod $1.ko

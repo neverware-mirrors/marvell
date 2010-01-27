@@ -15,7 +15,7 @@ Change log:
 #define _MLAN_DECL_H_
 
 /** MLAN release version */
-#define MLAN_RELEASE_VERSION		"058"
+#define MLAN_RELEASE_VERSION		"074"
 
 /** Re-define generic data types for MLAN/MOAL */
 /** Signed char (1-byte) */
@@ -44,12 +44,19 @@ typedef void t_void;
 #define MLAN_PACK_START
 /** Structure packeing end */
 #define MLAN_PACK_END  __attribute__ ((packed))
-#else
+#else /* !__GNUC__ */
+#ifdef PRAGMA_PACK
+/** Structure packing begins */
+#define MLAN_PACK_START
+/** Structure packeing end */
+#define MLAN_PACK_END
+#else /* !PRAGMA_PACK */
 /** Structure packing begins */
 #define MLAN_PACK_START   __packed
 /** Structure packeing end */
 #define MLAN_PACK_END
-#endif
+#endif /* PRAGMA_PACK */
+#endif /* __GNUC__ */
 
 #ifdef __GNUC__
 #define	INLINE	inline
@@ -83,7 +90,7 @@ typedef void t_void;
 #define MLAN_MAX_BASTREAM_SUPPORTED     2
 
 /** Default Win size attached during ADDBA request */
-#define MLAN_AMPDU_DEF_TXWINSIZE        64
+#define MLAN_AMPDU_DEF_TXWINSIZE        32
 /** Default Win size attached during ADDBA response */
 #define MLAN_AMPDU_DEF_RXWINSIZE        16
 /** Block ack timeout value */
@@ -284,6 +291,7 @@ typedef enum _mlan_event_id
     MLAN_EVENT_ID_DRV_HS_DEACTIVATED,
     MLAN_EVENT_ID_DRV_OBSS_SCAN_PARAM,
     MLAN_EVENT_ID_DRV_PASSTHU,
+    MLAN_EVENT_ID_DRV_SCAN_REPORT,
 } mlan_event_id;
 
 /** Data Structures */
@@ -392,6 +400,68 @@ typedef struct _mlan_bss_attr
     t_u32 bss_priority;
 } mlan_bss_attr, *pmlan_bss_attr;
 
+#ifdef PRAGMA_PACK
+#pragma pack(push, 1)
+#endif
+
+/** Type enumeration for the command result */
+typedef MLAN_PACK_START enum _mlan_cmd_result_e
+{
+    MLAN_CMD_RESULT_SUCCESS = 0,
+    MLAN_CMD_RESULT_FAILURE = 1,
+    MLAN_CMD_RESULT_TIMEOUT = 2,
+    MLAN_CMD_RESULT_INVALID_DATA = 3
+} MLAN_PACK_END mlan_cmd_result_e;
+
+/** Type enumeration of WMM AC_QUEUES */
+typedef MLAN_PACK_START enum _mlan_wmm_ac_e
+{
+    WMM_AC_BK,
+    WMM_AC_BE,
+    WMM_AC_VI,
+    WMM_AC_VO
+} MLAN_PACK_END mlan_wmm_ac_e;
+
+/** Type enumeration for the action field in the Queue Config command */
+typedef MLAN_PACK_START enum _mlan_wmm_queue_config_action_e
+{
+    MLAN_WMM_QUEUE_CONFIG_ACTION_GET = 0,
+    MLAN_WMM_QUEUE_CONFIG_ACTION_SET = 1,
+    MLAN_WMM_QUEUE_CONFIG_ACTION_DEFAULT = 2,
+    MLAN_WMM_QUEUE_CONFIG_ACTION_MAX
+} MLAN_PACK_END mlan_wmm_queue_config_action_e;
+
+/** Type enumeration for the action field in the queue stats command */
+typedef MLAN_PACK_START enum _mlan_wmm_queue_stats_action_e
+{
+    MLAN_WMM_STATS_ACTION_START = 0,
+    MLAN_WMM_STATS_ACTION_STOP = 1,
+    MLAN_WMM_STATS_ACTION_GET_CLR = 2,
+    MLAN_WMM_STATS_ACTION_SET_CFG = 3,  /* Not currently used */
+    MLAN_WMM_STATS_ACTION_GET_CFG = 4,  /* Not currently used */
+    MLAN_WMM_STATS_ACTION_MAX
+} MLAN_PACK_END mlan_wmm_queue_stats_action_e;
+
+/** Max Ie length */
+#define MAX_IE_SIZE             256
+
+/** custom IE */
+typedef MLAN_PACK_START struct _custom_ie
+{
+    /** IE Index */
+    t_u16 ie_index;
+    /** Mgmt Subtype Mask */
+    t_u16 mgmt_subtype_mask;
+    /** IE Length */
+    t_u16 ie_length;
+    /** IE buffer */
+    t_u8 ie_buffer[MAX_IE_SIZE];
+} MLAN_PACK_END custom_ie;
+
+#ifdef PRAGMA_PACK
+#pragma pack(pop)
+#endif
+
 /** mlan_callbacks data structure */
 typedef struct _mlan_callbacks
 {
@@ -491,10 +561,6 @@ typedef struct _mlan_device
     /** MFG mode */
     t_u32 mfg_mode;
 #endif
-    /** SDIO interrupt mode */
-    t_u32 int_mode;
-    /** GPIO interrupt pin */
-    t_u32 gpio_pin;
 } mlan_device, *pmlan_device;
 
 /** MLAN API function prototype */
@@ -526,9 +592,6 @@ MLAN_API mlan_status mlan_send_packet(IN t_void * pmlan_adapter,
 
 /** interrupt handler */
 MLAN_API t_void mlan_interrupt(IN t_void * pmlan_adapter);
-
-/** GPIO IRQ callback function */
-MLAN_API t_void mlan_hs_callback(IN t_void * pctx);
 
 /** mlan ioctl */
 MLAN_API mlan_status mlan_ioctl(IN t_void * pmlan_adapter,

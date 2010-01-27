@@ -72,5 +72,7 @@ mlan_status wlan_cmd_11n_addba_rspgen(mlan_private * priv,
 mlan_status wlan_cmd_11n_addba_req(mlan_private * priv,
                                    HostCmd_DS_COMMAND * cmd, void *pdata_buf);
 void wlan_11n_cleanup_reorder_tbl(mlan_private * priv);
+RxReorderTbl *wlan_11n_get_rxreorder_tbl(mlan_private * priv, int tid,
+                                         t_u8 * ta);
 
 #endif /* _MLAN_11N_RXREORDER_H_ */

@@ -16,6 +16,47 @@ Change log:
 #ifndef _MLAN_FW_H_
 #define _MLAN_FW_H_
 
+/** Interface header length */
+#define INTF_HEADER_LEN     4
+
+/** Ethernet header */
+typedef struct
+{
+    /** Ethernet header destination address */
+    t_u8 dest_addr[MLAN_MAC_ADDR_LENGTH];
+    /** Ethernet header source address */
+    t_u8 src_addr[MLAN_MAC_ADDR_LENGTH];
+    /** Ethernet header length */
+    t_u16 h803_len;
+
+} Eth803Hdr_t;
+
+/** RFC 1042 header */
+typedef struct
+{
+    /** LLC DSAP */
+    t_u8 llc_dsap;
+    /** LLC SSAP */
+    t_u8 llc_ssap;
+    /** LLC CTRL */
+    t_u8 llc_ctrl;
+    /** SNAP OUI */
+    t_u8 snap_oui[3];
+    /** SNAP type */
+    t_u16 snap_type;
+
+} Rfc1042Hdr_t;
+
+/** Rx packet header */
+typedef struct
+{
+    /** Etherner header */
+    Eth803Hdr_t eth803_hdr;
+    /** RFC 1042 header */
+    Rfc1042Hdr_t rfc1042_hdr;
+
+} RxPacketHdr_t;
+
 /** Rates supported in band B */
 #define B_SUPPORTED_RATES               5
 /** Rates supported in band G */
@@ -52,13 +93,6 @@ extern t_u8 AdhocRates_G[G_SUPPORTED_RATES];
 extern t_u8 AdhocRates_B[B_SUPPORTED_RATES];
 extern t_u8 AdhocRates_BG[BG_SUPPORTED_RATES];
 extern t_u8 AdhocRates_A[A_SUPPORTED_RATES];
-
-/** Firmware wakeup method : Unchanged */
-#define WAKEUP_FW_UNCHANGED                     0
-/** Firmware wakeup method : Through interface */
-#define WAKEUP_FW_THRU_INTERFACE                1
-/** Firmware wakeup method : Through GPIO*/
-#define WAKEUP_FW_THRU_GPIO                     2
 
 /** WEP Key index mask */
 #define HostCmd_WEP_KEY_INDEX_MASK              0x3fff
@@ -250,7 +284,7 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** TLV type : Channel band list */
 #define TLV_TYPE_CHANNELBANDLIST    (PROPRIETARY_TLV_BASE_ID + 42)
 /** TLV type: WAPI IE */
-#define TLV_TYPE_WAPI_IE                 (PROPRIETARY_TLV_BASE_ID + 94)
+#define TLV_TYPE_WAPI_IE            (PROPRIETARY_TLV_BASE_ID + 94)
 
 /** TLV type : Encryption Protocol TLV */
 #define TLV_TYPE_ENCRYPTION_PROTO   (PROPRIETARY_TLV_BASE_ID + 64)
@@ -262,6 +296,9 @@ typedef enum _WLAN_802_11_WEP_STATUS
 #define TLV_TYPE_PASSPHRASE         (PROPRIETARY_TLV_BASE_ID + 60)
 /** TLV type : BSSID */
 #define TLV_TYPE_BSSID              (PROPRIETARY_TLV_BASE_ID + 35)
+
+/** 2K buf size */
+#define MLAN_TX_DATA_BUF_SIZE_2K        2048
 
 /** TLV type : HT Capabilities */
 #define TLV_TYPE_HT_CAP                  (PROPRIETARY_TLV_BASE_ID + 74)
@@ -310,8 +347,6 @@ typedef enum _WLAN_802_11_WEP_STATUS
 #define INITIATOR_BIT(DelBAParamSet) (((DelBAParamSet) & \
                         MBIT(DELBA_INITIATOR_POS)) >> DELBA_INITIATOR_POS)
 
-/** 2K buf size */
-#define MLAN_TX_DATA_BUF_SIZE_2K        2048
 /** 4K buf size */
 #define MLAN_TX_DATA_BUF_SIZE_4K        4096
 /** 8K buf size */
@@ -543,9 +578,6 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** Host Command ID : 802.11 RF antenna */
 #define HostCmd_CMD_802_11_RF_ANTENNA         0x0020
 
-/** Host Command ID : 802.11 Power Save mode */
-#define HostCmd_CMD_802_11_PS_MODE            0x0021
-
 /** Host Command ID : 802.11 deauthenticate */
 #define HostCmd_CMD_802_11_DEAUTHENTICATE     0x0024
 /** Host Command ID : MAC control */
@@ -558,18 +590,8 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** Host Command ID : 802.11 key material */
 #define HostCmd_CMD_802_11_KEY_MATERIAL       0x005e
 
-/** Host Command ID : 802.11 Deep Sleep */
-#define HostCmd_CMD_802_11_DEEP_SLEEP         0x003e
-
 /** Host Command ID : 802.11 Ad-Hoc stop */
 #define HostCmd_CMD_802_11_AD_HOC_STOP        0x0040
-
-/** Host Command ID : 802.11 Host Sleep configuration */
-#define HostCmd_CMD_802_11_HOST_SLEEP_CFG     0x0043
-/** Host Command ID : 802.11 Wakeup confirm */
-#define HostCmd_CMD_802_11_WAKEUP_CONFIRM     0x0044
-/** Host Command ID : 802.11 Host Sleep activated */
-#define HostCmd_CMD_802_11_HOST_SLEEP_ACTIVATE  0x0045
 
 /** Host Command ID : 802.22 MAC address */
 #define HostCmd_CMD_802_11_MAC_ADDRESS        0x004D
@@ -611,9 +633,6 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** Host Command ID : 802.11 get status */
 #define HostCmd_CMD_WMM_GET_STATUS            0x0071
 
-/** Host Command ID : 802.11 firmware wakeup method */
-#define HostCmd_CMD_802_11_FW_WAKE_METHOD     0x0074
-
 /** Host Command ID : 802.11 Tx rate query */
 #define HostCmd_CMD_802_11_TX_RATE_QUERY      0x007f
 
@@ -625,9 +644,6 @@ typedef enum _WLAN_802_11_WEP_STATUS
 
 /** Host Command ID : Memory access */
 #define HostCmd_CMD_MEM_ACCESS                0x0086
-
-/** Host Command ID : SDIO GPIO interrupt configuration */
-#define HostCmd_CMD_SDIO_GPIO_INT_CONFIG      0x0088
 
 #ifdef MFG_CMD_SUPPORT
 /** Host Command ID : Mfg command */
@@ -685,17 +701,23 @@ typedef enum _WLAN_802_11_WEP_STATUS
 /** Host Command ID : 802.11 b/g/n rate configration */
 #define HostCmd_CMD_TX_RATE_CFG               0x00d6
 
-/* For the IEEE Power Save */
-/** Host Subcommand ID : Enter power save */
-#define HostCmd_SubCmd_Enter_PS               0x0030
-/** Host Subcommand ID : Exit power save */
-#define HostCmd_SubCmd_Exit_PS                0x0031
-/** Host Subcommand ID : Sleep confirmed */
-#define HostCmd_SubCmd_Sleep_Confirmed        0x0034
-/** Host Subcommand ID : Full power down */
-#define HostCmd_SubCmd_Full_PowerDown         0x0035
-/** Host Subcommand ID : Full power up */
-#define HostCmd_SubCmd_Full_PowerUp           0x0036
+/** Host Command ID : Enhanced PS mode */
+#define HostCmd_CMD_802_11_PS_MODE_ENH        0x00e4
+/** Host command action : Host sleep configuration */
+#define HostCmd_CMD_802_11_HS_CFG_ENH         0x00e5
+
+/** Host Command ID : CAU register access */
+#define HostCmd_CMD_CAU_REG_ACCESS            0x00ed
+
+/** Enhanced PS modes */
+typedef enum _ENH_PS_MODES
+{
+    EN_PS = 1,
+    DIS_PS,
+    EN_AUTO_DS,
+    DIS_AUTO_DS,
+    SLEEP_CONFIRM,
+} ENH_PS_MODES;
 
 /** Command RET code, MSB is set to 1 */
 #define HostCmd_RET_BIT                       0x8000
@@ -833,8 +855,6 @@ typedef enum _WLAN_802_11_WEP_STATUS
 #define EVENT_DEEP_SLEEP_AWAKE          0x00000010
 /** Card Event definition : Ad-Hoc BCN lost */
 #define EVENT_ADHOC_BCN_LOST            0x00000011
-/** Card Event definition : Host Sleep awake */
-#define EVENT_HOST_SLEEP_AWAKE          0x00000012
 /** Card Event definition : Stop Tx */
 #define EVENT_STOP_TX                   0x00000013
 /** Card Event definition : Start Tx */
@@ -861,6 +881,7 @@ typedef enum _WLAN_802_11_WEP_STATUS
 #define EVENT_SNR_HIGH                  0x0000001d
 /** Card Event definition : IBSS coalsced */
 #define EVENT_IBSS_COALESCED            0x0000001e
+
 /** Card Event definition : Data RSSI low */
 #define EVENT_DATA_RSSI_LOW             0x00000024
 /** Card Event definition : Data SNR low */
@@ -887,6 +908,8 @@ typedef enum _WLAN_802_11_WEP_STATUS
 #define EVENT_AMSDU_AGGR_CTRL           0x00000042
 /** Card Event definition: WEP ICV error */
 #define EVENT_WEP_ICV_ERR               0x00000046
+/** Card Event definition : Host sleep enable */
+#define EVENT_HS_ACT_REQ                0x00000047
 /** Card Event definition : BW changed */
 #define EVENT_BW_CHANGE                 0x00000048
 
@@ -934,6 +957,10 @@ typedef struct _WLAN_802_11_VARIABLE_IEs
     t_u8 data[1];
 } WLAN_802_11_VARIABLE_IEs;
 
+#ifdef PRAGMA_PACK
+#pragma pack(push, 1)
+#endif
+
 /** TLV related data structures*/
 /** MrvlIEtypesHeader_t */
 typedef MLAN_PACK_START struct _MrvlIEtypesHeader
@@ -952,6 +979,94 @@ typedef MLAN_PACK_START struct _MrvlIEtypes_Data_t
     /** Data */
     t_u8 data[1];
 } MLAN_PACK_END MrvlIEtypes_Data_t;
+
+/** Bit mask for TxPD status field for null packet */
+#define MRVDRV_TxPD_POWER_MGMT_NULL_PACKET 0x01
+/** Bit mask for TxPD status field for last packet */
+#define MRVDRV_TxPD_POWER_MGMT_LAST_PACKET 0x08
+
+/** TxPD descriptor */
+typedef MLAN_PACK_START struct _TxPD
+{
+    /** BSS type */
+    t_u8 bss_type;
+    /** BSS number */
+    t_u8 bss_num;
+    /** Tx packet length */
+    t_u16 tx_pkt_length;
+    /** Tx packet offset */
+    t_u16 tx_pkt_offset;
+    /** Tx packet type */
+    t_u16 tx_pkt_type;
+    /** Tx Control */
+    t_u32 tx_control;
+    /** Pkt Priority */
+    t_u8 priority;
+    /** Transmit Pkt Flags*/
+    t_u8 flags;
+    /** Amount of time the packet has been queued in the driver (units = 2ms)*/
+    t_u8 pkt_delay_2ms;
+    /** Reserved */
+    t_u8 reserved1;
+} MLAN_PACK_END TxPD, *PTxPD;
+
+/** RxPD Descriptor */
+typedef MLAN_PACK_START struct _RxPD
+{
+    /** BSS type */
+    t_u8 bss_type;
+    /** BSS number */
+    t_u8 bss_num;
+    /** Rx Packet Length */
+    t_u16 rx_pkt_length;
+    /** Rx Pkt offset */
+    t_u16 rx_pkt_offset;
+    /** Rx packet type */
+    t_u16 rx_pkt_type;
+    /** Sequence number */
+    t_u16 seq_num;
+    /** Packet Priority */
+    t_u8 priority;
+    /** Rx Packet Rate */
+    t_u8 rx_rate;
+    /** SNR */
+    t_s8 snr;
+    /** Noise Floor */
+    t_s8 nf;
+    /** Ht Info [Bit 0] RxRate format: LG=0, HT=1
+     * [Bit 1]  HT Bandwidth: BW20 = 0, BW40 = 1
+     * [Bit 2]  HT Guard Interval: LGI = 0, SGI = 1 */
+    t_u8 ht_info;
+    /** Reserved */
+    t_u8 reserved;
+} MLAN_PACK_END RxPD, *PRxPD;
+
+/** (Beaconsize(256)-5(IEId,len,contrystr(3))/3(FirstChan,NoOfChan,MaxPwr) */
+#define MAX_NO_OF_CHAN          40
+
+/** Channel-power table entries */
+typedef MLAN_PACK_START struct _chan_power_11d
+{
+    /** 11D channel */
+    t_u8 chan;
+    /** 11D channel power */
+    t_u8 pwr;
+} MLAN_PACK_END chan_power_11d_t;
+
+/** Region channel info */
+typedef MLAN_PACK_START struct _parsed_region_chan_11d
+{
+    /** 11D band */
+    t_u8 band;
+    /** 11D region */
+    t_u8 region;
+    /** 11D country code */
+    t_u8 country_code[COUNTRY_CODE_LEN];
+    /** 11D channel power per channel */
+    chan_power_11d_t chan_pwr[MAX_NO_OF_CHAN];
+    /** 11D number of channels */
+    t_u8 no_of_chan;
+} MLAN_PACK_END parsed_region_chan_11d_t;
 
 /** ChanScanMode_t */
 typedef MLAN_PACK_START struct _ChanScanMode_t
@@ -1203,7 +1318,7 @@ typedef struct _HostCmd_DS_GEN
     t_u16 seq_num;
     /** Result */
     t_u16 result;
-} HostCmd_DS_GEN, HostCmd_DS_802_11_DEEP_SLEEP;
+} HostCmd_DS_GEN;
 
 /** Size of HostCmd_DS_GEN */
 #define S_DS_GEN        sizeof(HostCmd_DS_GEN)
@@ -1236,6 +1351,74 @@ typedef MLAN_PACK_START struct _HostCmd_DS_802_11_SLEEP_PARAMS
     /** Reserved field, should be set to zero */
     t_u16 reserved;
 } MLAN_PACK_END HostCmd_DS_802_11_SLEEP_PARAMS;
+
+/** Sleep response control */
+typedef enum _sleep_resp_ctrl
+{
+    RESP_NOT_NEEDED = 0,
+    RESP_NEEDED,
+} sleep_resp_ctrl;
+
+/** Structure definition for the new ieee power save parameters*/
+typedef struct __ps_param
+{
+      /** Null packet interval */
+    t_u16 null_pkt_interval;
+      /** Num dtims */
+    t_u16 multiple_dtims;
+      /** becaon miss interval */
+    t_u16 bcn_miss_timeout;
+      /** local listen interval */
+    t_u16 local_listen_interval;
+     /** Adhoc awake period */
+    t_u16 adhoc_wake_period;
+     /** mode - (0x01 - firmware to automatically choose PS_POLL or NULL mode, 0x02 - PS_POLL, 0x03 - NULL mode ) */
+    t_u16 mode;
+     /** Delay to PS in milliseconds */
+    t_u16 delay_to_ps;
+} ps_param;
+
+/** Structure definition for the new auto deep sleep command */
+typedef struct __auto_ds_param
+{
+     /** Deep sleep inactivity timeout */
+    t_u16 deep_sleep_timeout;
+} auto_ds_param;
+
+/** Structure definition for sleep confirmation in the new ps command */
+typedef struct __sleep_confirm_param
+{
+     /** response control 0x00 - response not needed, 0x01 - response needed */
+    t_u16 resp_ctrl;
+} sleep_confirm_param;
+
+/** Structure definition for new power save command */
+typedef MLAN_PACK_START struct _HostCmd_DS_PS_MODE_ENH
+{
+    /** Action */
+    t_u16 action;
+    /** Data speciifc to action */
+    /* For IEEE power save data will be as UINT16 mode (0x01 - firmware to
+       automatically choose PS_POLL or NULL mode, 0x02 - PS_POLL, 0x03 - NULL
+       mode ) UINT16 NullpacketInterval UINT16 NumDtims UINT16
+       BeaconMissInterval UINT16 locallisteninterval UINT16 adhocawakeperiod */
+
+    /* For auto deep sleep */
+    /* UINT16 Deep sleep inactivity timeout */
+
+    /* For PS sleep confirm UINT16 responeCtrl - 0x00 - reponse from fw not
+       needed, 0x01 - response from fw is needed */
+
+    union
+    {
+    /** PS param definition */
+        ps_param opt_ps;
+    /** Auto ds param definition */
+        auto_ds_param auto_ds;
+    /** Sleep comfirm param definition */
+        sleep_confirm_param sleep_cfm;
+    } params;
+} MLAN_PACK_END HostCmd_DS_802_11_PS_MODE_ENH;
 
 /** HostCmd_DS_GET_HW_SPEC */
 typedef MLAN_PACK_START struct _HostCmd_DS_GET_HW_SPEC
@@ -1461,31 +1644,6 @@ typedef MLAN_PACK_START struct _HostCmd_DS_802_11_AD_HOC_JOIN
     t_u16 reserved2;
 } MLAN_PACK_END HostCmd_DS_802_11_AD_HOC_JOIN;
 
-/** Interrupt Mode SDIO */
-#define INTMODE_SDIO        0
-/** Interrupt Mode GPIO */
-#define INTMODE_GPIO        1
-
-/** Interrupt Raising Edge */
-#define INT_RASING_EDGE     0
-/** Interrupt Falling Edge */
-#define INT_FALLING_EDGE    1
-
-/** Delay 1 usec */
-#define DELAY_1_US          1
-
-typedef MLAN_PACK_START struct _HostCmd_DS_SDIO_GPIO_INT_CONFIG
-{
-    /** Action */
-    t_u16 action;
-    /** GPIO interrupt pin */
-    t_u16 gpio_pin;
-    /** GPIO interrupt edge, 1: failing edge; 0: raising edge */
-    t_u16 gpio_int_edge;
-    /** GPIO interrupt pulse widthin usec units */
-    t_u16 gpio_pulse_width;
-} MLAN_PACK_END HostCmd_DS_SDIO_GPIO_INT_CONFIG;
-
 typedef MLAN_PACK_START struct _HostCmd_DS_SDIO_PULL_CTRL
 {
     /** Action */
@@ -1540,61 +1698,48 @@ typedef MLAN_PACK_START struct _HostCmd_TX_RATE_QUERY
     t_u8 ht_info;
 } MLAN_PACK_END HostCmd_TX_RATE_QUERY;
 
-/** HostCmd_CMD_802_11_PS_MODE */
-typedef MLAN_PACK_START struct _HostCmd_DS_802_11_PS_MODE
+/** HS Action 0x0001 - Configure enhanced host sleep mode, 0x0002 - Activate enhanced host sleep mode */
+typedef enum _Host_Sleep_Action
 {
-    /** Action */
-    t_u16 action;
-    /** NULL packet interval */
-    t_u16 null_pkt_interval;
-    /** Multiple DTIM */
-    t_u16 multiple_dtim;
-    /** Beacon miss timeout */
-    t_u16 bcn_miss_time_out;
-    /** Local listen interval */
-    t_u16 local_listen_interval;
-} MLAN_PACK_END HostCmd_DS_802_11_PS_MODE;
+    HS_CONFIGURE = 0x0001,
+    HS_ACTIVATE = 0x0002,
+} Host_Sleep_Action;
 
-/** PS_CMD_ConfirmSleep */
-typedef MLAN_PACK_START struct _PS_CMD_ConfirmSleep
-{
-    /** Command */
-    t_u16 command;
-    /** Size */
-    t_u16 size;
-    /** Sequence number */
-    t_u16 seq_num;
-    /** Result */
-    t_u16 result;
-
-    /** Action */
-    t_u16 action;
-    /** Reserved */
-    t_u16 reserved1;
-    /** Multiple DTIM */
-    t_u16 multiple_dtim;
-    /** Reserved */
-    t_u16 reserved;
-    /** Local listen interval */
-    t_u16 local_listen_interval;
-} MLAN_PACK_END PS_CMD_ConfirmSleep;
-
-/** HostCmd_DS_802_11_HOST_SLEEP_CFG */
-typedef MLAN_PACK_START struct _HostCmd_DS_802_11_HOST_SLEEP_CFG
+typedef MLAN_PACK_START struct _hs_config_param
 {
     /** bit0=1: non-unicast data
       * bit1=1: unicast data
       * bit2=1: mac events
-      * bit3=1: magic packet
+      * bit3=1: magic packet 
       */
     t_u32 conditions;
-
     /** GPIO */
     t_u8 gpio;
-
     /** in milliseconds */
     t_u8 gap;
-} MLAN_PACK_END HostCmd_DS_802_11_HOST_SLEEP_CFG;
+} MLAN_PACK_END hs_config_param;
+
+/** Structure definition for activating enhanced hs */
+typedef MLAN_PACK_START struct __hs_activate_param
+{
+     /** response control 0x00 - response not needed, 0x01 - response needed */
+    t_u16 resp_ctrl;
+} MLAN_PACK_END hs_activate_param;
+
+/** HostCmd_DS_802_11_HS_CFG_ENH */
+typedef MLAN_PACK_START struct _HostCmd_DS_802_11_HS_CFG_ENH
+{
+    /** Action 0x0001 - Configure enhanced host sleep mode, 0x0002 - Activate enhanced host sleep mode */
+    t_u16 action;
+
+    union
+    {
+    /** Configure enhanced hs */
+        hs_config_param hs_config;
+    /** Activate enhanced hs */
+        hs_activate_param hs_activate;
+    } params;
+} MLAN_PACK_END HostCmd_DS_802_11_HS_CFG_ENH;
 
 /** HostCmd_DS_802_11_BCA_TIMESHARE */
 typedef MLAN_PACK_START struct _HostCmd_DS_802_11_BCA_TIMESHARE
@@ -1608,15 +1753,6 @@ typedef MLAN_PACK_START struct _HostCmd_DS_802_11_BCA_TIMESHARE
     /** PTA arbiter time in msec */
     t_u32 bt_time;
 } MLAN_PACK_END HostCmd_DS_802_11_BCA_TIMESHARE;
-
-/** HostCmd_CMD_802_11_FW_WAKE_METHOD */
-typedef MLAN_PACK_START struct _HostCmd_DS_802_11_FW_WAKEUP_METHOD
-{
-    /** Action */
-    t_u16 action;
-    /** Method */
-    t_u16 method;
-} MLAN_PACK_END HostCmd_DS_802_11_FW_WAKEUP_METHOD;
 
 /** SNMP_MIB_INDEX */
 typedef enum _SNMP_MIB_INDEX
@@ -1750,6 +1886,166 @@ typedef MLAN_PACK_START struct _HostCmd_DS_TXPWR_CFG
     t_u32 mode;
     /* MrvlTypes_Power_Group_t PowerGrpCfg[0] */
 } MLAN_PACK_END HostCmd_DS_TXPWR_CFG;
+
+/** Maximum number of channels that can be sent in user scan config */
+#define WLAN_USER_SCAN_CHAN_MAX             50
+
+/** Maximum length of SSID list */
+#define MRVDRV_MAX_SSID_LIST_LENGTH         10
+
+/**
+ * @brief Structure used internally in the wlan driver to configure a scan.
+ *
+ * Sent to the command process module to configure the firmware
+ *   scan command prepared by wlan_cmd_802_11_scan.
+ *
+ * @sa wlan_scan_networks
+ *
+ */
+typedef MLAN_PACK_START struct _wlan_scan_cmd_config
+{
+    /**
+     *  BSS Type to be sent in the firmware command
+     *
+     *  Field can be used to restrict the types of networks returned in the
+     *    scan.  Valid settings are:
+     *
+     *   - MLAN_SCAN_MODE_BSS  (infrastructure)
+     *   - MLAN_SCAN_MODE_IBSS (adhoc)
+     *   - MLAN_SCAN_MODE_ANY  (unrestricted, adhoc and infrastructure)
+     */
+    t_u8 bss_mode;
+
+    /**
+     *  Specific BSSID used to filter scan results in the firmware
+     */
+    t_u8 specific_bssid[MLAN_MAC_ADDR_LENGTH];
+
+    /**
+     *  Length of TLVs sent in command starting at tlvBuffer
+     */
+    t_u32 tlv_buf_len;
+
+    /**
+     *  SSID TLV(s) and ChanList TLVs to be sent in the firmware command
+     *
+     *  TLV_TYPE_CHANLIST, MrvlIEtypes_ChanListParamSet_t
+     *  TLV_TYPE_SSID, MrvlIEtypes_SsIdParamSet_t
+     */
+    t_u8 tlv_buf[1];            /* SSID TLV(s) and ChanList TLVs are stored
+                                   here */
+} MLAN_PACK_END wlan_scan_cmd_config;
+
+/**
+ *  @brief IOCTL channel sub-structure sent in wlan_ioctl_user_scan_cfg
+ *
+ *  Multiple instances of this structure are included in the IOCTL command
+ *   to configure a instance of a scan on the specific channel.
+ */
+typedef MLAN_PACK_START struct _wlan_user_scan_chan
+{
+    /** Channel Number to scan */
+    t_u8 chan_number;
+    /** Radio type: 'B/G' Band = 0, 'A' Band = 1 */
+    t_u8 radio_type;
+    /** Scan type: Active = 0, Passive = 1 */
+    t_u8 scan_type;
+    /** Reserved */
+    t_u8 reserved;
+    /** Scan duration in milliseconds; if 0 default used */
+    t_u32 scan_time;
+} MLAN_PACK_END wlan_user_scan_chan;
+
+/**
+ *  IOCTL SSID List sub-structure sent in wlan_ioctl_user_scan_cfg
+ * 
+ *  Used to specify SSID specific filters as well as SSID pattern matching
+ *    filters for scan result processing in firmware.
+ */
+typedef MLAN_PACK_START struct _wlan_user_scan_ssid
+{
+    /** SSID */
+    t_u8 ssid[MLAN_MAX_SSID_LENGTH + 1];
+    /** Maximum length of SSID */
+    t_u8 max_len;
+} MLAN_PACK_END wlan_user_scan_ssid;
+
+/**
+ *  Input structure to configure an immediate scan cmd to firmware
+ *
+ *  Specifies a number of parameters to be used in general for the scan 
+ *    as well as a channel list (wlan_user_scan_chan) for each scan period
+ *    desired.
+ */
+typedef MLAN_PACK_START struct
+{
+    /**
+     *  Flag set to keep the previous scan table intact
+     *
+     *  If set, the scan results will accumulate, replacing any previous
+     *   matched entries for a BSS with the new scan data
+     */
+    t_u8 keep_previous_scan;
+    /**
+     *  BSS mode to be sent in the firmware command
+     *
+     *  Field can be used to restrict the types of networks returned in the
+     *    scan.  Valid settings are:
+     *
+     *   - MLAN_SCAN_MODE_BSS  (infrastructure)
+     *   - MLAN_SCAN_MODE_IBSS (adhoc)
+     *   - MLAN_SCAN_MODE_ANY  (unrestricted, adhoc and infrastructure)        
+     */
+    t_u8 bss_mode;
+    /**
+     *  Configure the number of probe requests for active chan scans
+     */
+    t_u8 num_probes;
+    /**
+     *  @brief Reserved
+     */
+    t_u8 reserved;
+    /**
+     *  @brief BSSID filter sent in the firmware command to limit the results
+     */
+    t_u8 specific_bssid[MLAN_MAC_ADDR_LENGTH];
+    /**
+     *  SSID filter list used in the to limit the scan results
+     */
+    wlan_user_scan_ssid ssid_list[MRVDRV_MAX_SSID_LIST_LENGTH];
+    /**
+     *  Variable number (fixed maximum) of channels to scan up
+     */
+    wlan_user_scan_chan chan_list[WLAN_USER_SCAN_CHAN_MAX];
+} MLAN_PACK_END wlan_user_scan_cfg;
+
+/**
+ *  Sructure to retrieve the scan table
+ */
+typedef MLAN_PACK_START struct
+{
+    /**
+     *  - Zero based scan entry to start retrieval in command request
+     *  - Number of scans entries returned in command response
+     */
+    t_u32 scan_number;
+    /**
+     * Buffer marker for multiple wlan_ioctl_get_scan_table_entry structures.
+     *   Each struct is padded to the nearest 32 bit boundary.
+     */
+    t_u8 scan_table_entry_buf[1];
+} MLAN_PACK_END wlan_get_scan_table_info;
+
+/** Generic structure defined for parsing WPA/RSN IEs for GTK/PTK OUIs */
+typedef MLAN_PACK_START struct
+{
+        /** Group key oui */
+    t_u8 GrpKeyOui[4];
+        /** Number of PTKs */
+    t_u8 PtkCnt[2];
+        /** Ptk body starts here */
+    t_u8 PtkBody[4];
+} MLAN_PACK_END IEBody;
 
 /* 
  * This scan handle Country Information IE(802.11d compliant) 
@@ -2387,9 +2683,9 @@ typedef MLAN_PACK_START struct _HostCmd_DS_PMIC_REG_ACCESS
 {
     /** Action */
     t_u16 action;
-    /** RF register offset */
+    /** PMIC register offset */
     t_u16 offset;
-    /** RF register value */
+    /** PMIC register value */
     t_u8 value;
     /** Reserved field */
     t_u8 reserved[3];
@@ -2669,7 +2965,7 @@ typedef MLAN_PACK_START struct
 } MLAN_PACK_END HostCmd_DS_MEASUREMENT_REPORT;
 
 /** HostCmd_DS_COMMAND */
-typedef struct _HostCmd_DS_COMMAND
+typedef struct MLAN_PACK_START _HostCmd_DS_COMMAND
 {
     /** Command Header : Command */
     t_u16 command;
@@ -2710,10 +3006,9 @@ typedef struct _HostCmd_DS_COMMAND
         HostCmd_DS_TXPWR_CFG txp_cfg;
         /** RF antenna */
         HostCmd_DS_802_11_RF_ANTENNA antenna;
-        /** Power Save mode */
-        HostCmd_DS_802_11_PS_MODE ps_mode;
-        HostCmd_DS_802_11_HOST_SLEEP_CFG hs_cfg;
-        HostCmd_DS_802_11_FW_WAKEUP_METHOD fwwakeupmethod;
+        /** Enhanced power save command */
+        HostCmd_DS_802_11_PS_MODE_ENH psmode_enh;
+        HostCmd_DS_802_11_HS_CFG_ENH opt_hs_cfg;
         /** Scan */
         HostCmd_DS_802_11_SCAN scan;
         /** Scan response */
@@ -2805,9 +3100,19 @@ typedef struct _HostCmd_DS_COMMAND
        /** Sleep params command */
         HostCmd_DS_802_11_SLEEP_PARAMS sleep_param;
 
-       /** SDIO GPIO interrupt config command */
-        HostCmd_DS_SDIO_GPIO_INT_CONFIG sdio_gpio_int;
     } params;
-} HostCmd_DS_COMMAND;
+} MLAN_PACK_END HostCmd_DS_COMMAND;
+
+typedef struct MLAN_PACK_START _opt_sleep_confirm_buffer
+{
+    /** Header for interface */
+    t_u8 hdr[4];
+    /** New power save command used to send sleep confirmation to the firmware */
+    HostCmd_DS_COMMAND ps_cfm_sleep;
+} MLAN_PACK_END opt_sleep_confirm_buffer;
+
+#ifdef PRAGMA_PACK
+#pragma pack(pop)
+#endif
 
 #endif /* !_MLAN_FW_H_ */

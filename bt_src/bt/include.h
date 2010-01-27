@@ -34,7 +34,10 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include  <linux/version.h>
-#include <sdio.h>
+#include <linux/mmc/sdio.h>
+#include <linux/mmc/sdio_ids.h>
+#include <linux/mmc/sdio_func.h>
+#include <linux/mmc/card.h>
 #include "bt_drv.h"
 #include "bt_sdio.h"
 #endif /* _INCLUDE_H_ */

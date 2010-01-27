@@ -13,9 +13,7 @@ Change log:
 ********************************************************/
 
 #include "mlan.h"
-#include "mlan_11d.h"
 #include "mlan_join.h"
-#include "mlan_scan.h"
 #include "mlan_util.h"
 #include "mlan_fw.h"
 #include "mlan_main.h"
@@ -47,9 +45,10 @@ Change log:
 static mlan_status
 wlan_11n_dispatch_pkt(t_void * priv, t_void * payload)
 {
+    mlan_status ret = MLAN_STATUS_SUCCESS;
     pmlan_adapter pmadapter = ((pmlan_private) priv)->adapter;
-
-    return wlan_process_rx_packet(pmadapter, (pmlan_buffer) payload);
+    ret = wlan_process_rx_packet(pmadapter, (pmlan_buffer) payload);
+    return ret;
 }
 
 /**
@@ -69,6 +68,8 @@ wlan_11n_dispatch_pkt_until_start_win(t_void * priv,
 {
     int no_pkt_to_send, i, xchg;
     mlan_status ret = MLAN_STATUS_SUCCESS;
+    void *rx_tmp_ptr = MNULL;
+    mlan_private *pmpriv = (mlan_private *) priv;
 
     ENTER();
 
@@ -77,12 +78,18 @@ wlan_11n_dispatch_pkt_until_start_win(t_void * priv,
             rx_reor_tbl_ptr->win_size) : rx_reor_tbl_ptr->win_size;
 
     for (i = 0; i < no_pkt_to_send; ++i) {
+        pmpriv->adapter->callbacks.moal_spin_lock(pmpriv->rx_pkt_lock);
+        rx_tmp_ptr = MNULL;
         if (rx_reor_tbl_ptr->rx_reorder_ptr[i]) {
-            wlan_11n_dispatch_pkt(priv, rx_reor_tbl_ptr->rx_reorder_ptr[i]);
+            rx_tmp_ptr = rx_reor_tbl_ptr->rx_reorder_ptr[i];
             rx_reor_tbl_ptr->rx_reorder_ptr[i] = MNULL;
         }
+        pmpriv->adapter->callbacks.moal_spin_unlock(pmpriv->rx_pkt_lock);
+        if (rx_tmp_ptr)
+            wlan_11n_dispatch_pkt(priv, rx_tmp_ptr);
     }
 
+    pmpriv->adapter->callbacks.moal_spin_lock(pmpriv->rx_pkt_lock);
     /* 
      * We don't have a circular buffer, hence use rotation to simulate
      * circular buffer
@@ -95,6 +102,7 @@ wlan_11n_dispatch_pkt_until_start_win(t_void * priv,
     }
 
     rx_reor_tbl_ptr->start_win = start_win;
+    pmpriv->adapter->callbacks.moal_spin_unlock(pmpriv->rx_pkt_lock);
 
     LEAVE();
     return ret;
@@ -135,17 +143,24 @@ wlan_11n_scan_and_dispatch(t_void * priv, RxReorderTbl * rx_reor_tbl_ptr)
 {
     int i, j, xchg;
     mlan_status ret = MLAN_STATUS_SUCCESS;
+    void *rx_tmp_ptr = MNULL;
+    mlan_private *pmpriv = (mlan_private *) priv;
 
     ENTER();
 
     for (i = 0; i < rx_reor_tbl_ptr->win_size; ++i) {
-        if (!rx_reor_tbl_ptr->rx_reorder_ptr[i])
+        pmpriv->adapter->callbacks.moal_spin_lock(pmpriv->rx_pkt_lock);
+        if (!rx_reor_tbl_ptr->rx_reorder_ptr[i]) {
+            pmpriv->adapter->callbacks.moal_spin_unlock(pmpriv->rx_pkt_lock);
             break;
-
-        wlan_11n_dispatch_pkt(priv, rx_reor_tbl_ptr->rx_reorder_ptr[i]);
+        }
+        rx_tmp_ptr = rx_reor_tbl_ptr->rx_reorder_ptr[i];
         rx_reor_tbl_ptr->rx_reorder_ptr[i] = MNULL;
+        pmpriv->adapter->callbacks.moal_spin_unlock(pmpriv->rx_pkt_lock);
+        wlan_11n_dispatch_pkt(priv, rx_tmp_ptr);
     }
 
+    pmpriv->adapter->callbacks.moal_spin_lock(pmpriv->rx_pkt_lock);
     /* 
      * We don't have a circular buffer, hence use rotation to simulate
      * circular buffer
@@ -159,8 +174,8 @@ wlan_11n_scan_and_dispatch(t_void * priv, RxReorderTbl * rx_reor_tbl_ptr)
         }
     }
     rx_reor_tbl_ptr->start_win = (rx_reor_tbl_ptr->start_win + i)
-        % MAX_TID_VALUE;
-
+        & (MAX_TID_VALUE - 1);
+    pmpriv->adapter->callbacks.moal_spin_unlock(pmpriv->rx_pkt_lock);
     LEAVE();
     return ret;
 }
@@ -190,7 +205,7 @@ wlan_11n_delete_rxreorder_tbl_entry(mlan_private * priv,
     wlan_11n_dispatch_pkt_until_start_win(priv, rx_reor_tbl_ptr,
                                           (rx_reor_tbl_ptr->start_win +
                                            rx_reor_tbl_ptr->win_size)
-                                          % MAX_TID_VALUE);
+                                          & (MAX_TID_VALUE - 1));
 
     if (rx_reor_tbl_ptr->timer_context.timer) {
         if (rx_reor_tbl_ptr->timer_context.timer_is_set)
@@ -282,7 +297,8 @@ wlan_flush_data(t_void * context)
         wlan_11n_dispatch_pkt_until_start_win(reorder_cnxt->priv,
                                               reorder_cnxt->ptr,
                                               ((reorder_cnxt->ptr->start_win +
-                                                startWin + 1) % MAX_TID_VALUE));
+                                                startWin + 1) & (MAX_TID_VALUE -
+                                                                 1)));
     }
 
     wlan_11n_display_tbl_ptr(reorder_cnxt->priv->adapter, reorder_cnxt->ptr);
@@ -523,7 +539,7 @@ mlan_11n_rxreorder_pkt(void *priv, t_u16 seq_num, t_u16 tid,
 
         start_win = rx_reor_tbl_ptr->start_win;
         win_size = rx_reor_tbl_ptr->win_size;
-        end_win = ((start_win + win_size) - 1) & ~(MAX_TID_VALUE);
+        end_win = ((start_win + win_size) - 1) & (MAX_TID_VALUE - 1);
         if (rx_reor_tbl_ptr->timer_context.timer_is_set)
             pmadapter->callbacks.moal_stop_timer(rx_reor_tbl_ptr->timer_context.
                                                  timer);
@@ -542,7 +558,7 @@ mlan_11n_rxreorder_pkt(void *priv, t_u16 seq_num, t_u16 tid,
          */
         if ((start_win + TWOPOW11) > (MAX_TID_VALUE - 1)) {     /* Wrap */
             if (seq_num >= ((start_win + (TWOPOW11)) &
-                            ~(MAX_TID_VALUE)) && (seq_num < start_win)) {
+                            (MAX_TID_VALUE - 1)) && (seq_num < start_win)) {
                 LEAVE();
                 return MLAN_STATUS_FAILURE;
             }
@@ -557,7 +573,7 @@ mlan_11n_rxreorder_pkt(void *priv, t_u16 seq_num, t_u16 tid,
          * WinStart = seq_num
          */
         if (pkt_type == PKT_TYPE_BAR)
-            seq_num = ((seq_num + win_size) - 1) & ~(MAX_TID_VALUE);
+            seq_num = ((seq_num + win_size) - 1) & (MAX_TID_VALUE - 1);
 
         PRINTM(MDAT_D, "2:seq_num %d start_win %d win_size %d end_win %d\n",
                seq_num, start_win, win_size, end_win);
@@ -641,14 +657,14 @@ mlan_11n_delete_bastream_tbl(mlan_private * priv, int tid,
     if (cleanup_rx_reorder_tbl) {
         if (!(rx_reor_tbl_ptr = wlan_11n_get_rxreorder_tbl(priv, tid,
                                                            peer_mac))) {
-            PRINTM(MERROR, "TID,TA not found in table!\n");
+            PRINTM(MWARN, "TID, TA not found in table!\n");
             LEAVE();
             return;
         }
         wlan_11n_delete_rxreorder_tbl_entry(priv, rx_reor_tbl_ptr);
     } else {
         if (!(ptxtbl = wlan_11n_get_txbastream_tbl(priv, tid, peer_mac))) {
-            PRINTM(MERROR, "TID,RA not found in table!\n");
+            PRINTM(MWARN, "TID, RA not found in table!\n");
             LEAVE();
             return;
         }
