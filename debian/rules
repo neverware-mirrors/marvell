@@ -9,14 +9,21 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-KERNELDIR=lib/modules/2.6.31.4-chromeos-intel-menlow/vendor/marvell
+flavour=chromeos-intel-menlow
+ARCH=i386
+CROSS_COMPILE=
+KERNELDIR=~/trunk/src/build/kernels/kernel-${flavour}/debian/build/build-${flavour}
+
+MRVL_MAKE=$(MAKE) KERNELDIR=$(KERNELDIR) CROSS_COMPILE=$(CROSS_COMPILE) \
+	ARCH=$(ARCH)
+
 INSTALL_DIR=$(CURDIR)/debian/marvell-8787
+MODULES_DIR=lib/modules/2.6.31-${flavour}/vendor/marvell
 
 configure: configure-stamp
 configure-stamp:
 	dh_testdir
-	# Add here commands to configure the package.
-
+	# nothing to do to configure package
 	touch configure-stamp
 
 
@@ -24,18 +31,15 @@ build: build-stamp
 
 build-stamp: configure-stamp
 	dh_testdir
-
-	# Add here commands to compile the package.
-
+	# NB: $(MAKE) -C wlan_src fails 'cuz $(PWD) is set wrong
+	cd wlan_src; $(MRVL_MAKE)
 	touch $@
 
 clean:
 	dh_testdir
 	dh_testroot
 	rm -f build-stamp configure-stamp
-
-	# Add here commands to clean up after the build process.
-
+	$(MRVL_MAKE) -C wlan_src clean
 	dh_clean
 
 install: build
@@ -44,11 +48,13 @@ install: build
 	dh_prep
 	dh_installdirs
 
+	mkdir -p $(INSTALL_DIR)/$(MODULES_DIR)
+	# NB: $(MAKE) -C wlan_src fails 'cuz $(PWD) is set wrong
+	cd wlan_src; $(MRVL_MAKE) INSTALLDIR=$(INSTALL_DIR)/$(MODULES_DIR) \
+	     install
+
 	mkdir -p $(INSTALL_DIR)
 	cp marvell_8787.conf $(INSTALL_DIR)/etc/modprobe.d
-
-	mkdir -p $(INSTALL_DIR)/$(KERNELDIR)
-	cp  build/*.ko $(INSTALL_DIR)/$(KERNELDIR)
 
 	mkdir -p $(INSTALL_DIR)/lib/firmware/mrvl
 	cp FwImage/sd8787.bin $(INSTALL_DIR)/lib/firmware/mrvl

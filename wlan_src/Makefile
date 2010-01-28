@@ -58,7 +58,8 @@ CONFIG_SDIO_MULTI_PORT_RX_AGGR=y
 #############################################################################
 
 MODEXT = ko
-EXTRA_CFLAGS += -I$(PWD)/mlan
+#EXTRA_CFLAGS += -I$(PWD)/mlan
+EXTRA_CFLAGS += -I$(M)/mlan
 EXTRA_CFLAGS += -DLINUX
 
 # KERNELDIR point to the installed kernel directory.
