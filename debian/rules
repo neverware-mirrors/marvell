@@ -18,7 +18,7 @@ MRVL_MAKE=$(MAKE) KERNELDIR=$(KERNELDIR) CROSS_COMPILE=$(CROSS_COMPILE) \
 	ARCH=$(ARCH)
 
 INSTALL_DIR=$(CURDIR)/debian/marvell-8787
-MODULES_DIR=lib/modules/2.6.31-${flavour}/vendor/marvell
+MODULES_DIR=lib/modules/2.6.31-0-${flavour}/vendor/marvell
 
 configure: configure-stamp
 configure-stamp:
