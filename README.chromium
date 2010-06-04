@@ -1,7 +1,7 @@
 URL: http://www.marvell.com
-Version: SD-WLAN-BT-FM-8787-LINUX2625-SAAR-14.64.1.p34-M2614058-1-GPL.TAR
-License: GPL v2
-License File: wlan_src/gpl-2.0.txt
+Version: SD8787 v14.64.2.p47
+License: Marvell International Ltd.
+License File: sd8787_license.txt
 
 Description:
-  Vendor drop of 8787 support (awaiting push upstream).
+  Vendor drop of SD8787 firmware image.
